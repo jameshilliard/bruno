@@ -156,6 +156,13 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode);
 /* allocate an skb, the data comes from ring buffer */
 static struct sk_buff *__bcmgenet_alloc_skb_from_buf(unsigned char *buf,
 		int len, int headroom);
+/* clock control */
+static void bcmgenet_clock_enable(struct BcmEnet_devctrl *pDevCtrl);
+static void bcmgenet_clock_disable(struct BcmEnet_devctrl *pDevCtrl);
+/* S3 warm boot */
+static void save_state(struct BcmEnet_devctrl *pDevCtrl);
+static void restore_state(struct BcmEnet_devctrl *pDevCtrl);
+
 static struct net_device *eth_root_dev;
 static int DmaDescThres = DMA_DESC_THRES;
 /*
@@ -452,6 +459,59 @@ static void bcmgenet_gphy_link_timer(unsigned long data)
 	schedule_work(&pDevCtrl->bcmgenet_link_work);
 	mod_timer(&pDevCtrl->timer, jiffies + HZ);
 }
+
+#ifdef CONFIG_BRCM_HAS_STANDBY
+static int bcmgenet_wakeup_enable(void *ref)
+{
+	struct BcmEnet_devctrl *pDevCtrl = (struct BcmEnet_devctrl *)ref;
+	u32 mask;
+	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA)
+		mask = WOL_MOCA_MASK;
+	else
+		mask = pDevCtrl->devnum ? WOL_MOCA_MASK : WOL_ENET_MASK;
+	if (device_may_wakeup(&pDevCtrl->dev->dev))
+		brcm_pm_wakeup_source_enable(mask, 1);
+	return 0;
+}
+
+static int bcmgenet_wakeup_disable(void *ref)
+{
+	struct BcmEnet_devctrl *pDevCtrl = (struct BcmEnet_devctrl *)ref;
+	u32 mask;
+	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA)
+		mask = WOL_MOCA_MASK;
+	else
+		mask = pDevCtrl->devnum ? WOL_MOCA_MASK : WOL_ENET_MASK;
+	if (device_may_wakeup(&pDevCtrl->dev->dev))
+		brcm_pm_wakeup_source_enable(mask, 0);
+	return 0;
+}
+
+static int bcmgenet_wakeup_poll(void *ref)
+{
+	struct BcmEnet_devctrl *pDevCtrl = (struct BcmEnet_devctrl *)ref;
+	int retval = 0;
+	u32 mask = 0;
+
+	if (device_may_wakeup(&pDevCtrl->dev->dev)) {
+		if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA)
+			mask = WOL_MOCA_MASK;
+		else
+			mask = pDevCtrl->devnum ? WOL_MOCA_MASK : WOL_ENET_MASK;
+		retval = brcm_pm_wakeup_get_status(mask);
+	}
+	printk(KERN_DEBUG "%s %s(%08x): %d\n", __func__,
+	       pDevCtrl->dev->name, mask, retval);
+	return retval;
+}
+
+static struct brcm_wakeup_ops bcmgenet_wakeup_ops = {
+	.enable = bcmgenet_wakeup_enable,
+	.disable = bcmgenet_wakeup_disable,
+	.poll = bcmgenet_wakeup_poll,
+};
+#endif
+
 /* --------------------------------------------------------------------------
 Name: bcmgenet_open
 Purpose: Open and Initialize the EMAC on the chip
@@ -462,12 +522,30 @@ static int bcmgenet_open(struct net_device *dev)
 	unsigned long dma_ctrl;
 
 	TRACE(("%s: bcmgenet_open\n", dev->name));
-	clk_enable(pDevCtrl->clk);
+
+	bcmgenet_clock_enable(pDevCtrl);
+
+	/* disable ethernet MAC while updating its registers */
+	pDevCtrl->umac->cmd &= ~(CMD_TX_EN | CMD_RX_EN);
+
+	if (pDevCtrl->wol_enabled) {
+		/* From WOL-enabled suspend, switch to regular clock */
+		clk_disable(pDevCtrl->clk_wol);
+		/* init umac registers to synchronize s/w with h/w */
+		init_umac(pDevCtrl);
+		/* Speed settings must be restored */
+		mii_init(dev);
+		mii_setup(dev);
+	}
 
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_INT)
 		pDevCtrl->ext->ext_pwr_mgmt |= EXT_ENERGY_DET_MASK;
-	/* disable ethernet MAC while updating its registers */
-	pDevCtrl->umac->cmd &= ~(CMD_TX_EN | CMD_RX_EN);
+
+	if (test_and_clear_bit(GENET_POWER_WOL_MAGIC, &pDevCtrl->wol_enabled))
+		bcmgenet_power_up(pDevCtrl, GENET_POWER_WOL_MAGIC);
+	if (test_and_clear_bit(GENET_POWER_WOL_ACPI, &pDevCtrl->wol_enabled))
+		bcmgenet_power_up(pDevCtrl, GENET_POWER_WOL_ACPI);
+
 	/* disable DMA */
 	dma_ctrl = 1 << (DESC_INDEX + DMA_RING_BUF_EN_SHIFT) | DMA_EN;
 	pDevCtrl->txDma->tdma_ctrl &= ~dma_ctrl;
@@ -478,12 +556,17 @@ static int bcmgenet_open(struct net_device *dev)
 	pDevCtrl->umac->tx_flush = 0;
 	GENET_RBUF_FLUSH_CTRL(pDevCtrl) = 0;
 
-	/* reset dma, start from begainning of the ring. */
+	/* reset dma, start from beginning of the ring. */
 	init_edma(pDevCtrl);
 	/* reset internal book keeping variables. */
 	pDevCtrl->txLastCIndex = 0;
 	pDevCtrl->rxBdAssignPtr = pDevCtrl->rxBds;
-	assign_rx_buffers(pDevCtrl);
+
+	if (brcm_pm_deep_sleep())
+		restore_state(pDevCtrl);
+	else
+		assign_rx_buffers(pDevCtrl);
+
 	pDevCtrl->txFreeBds = pDevCtrl->nrTxBds;
 
 	/*Always enable ring 16 - descriptor ring */
@@ -510,11 +593,18 @@ static int bcmgenet_open(struct net_device *dev)
 	/* Start the network engine */
 	netif_tx_start_all_queues(dev);
 	napi_enable(&pDevCtrl->napi);
+
 	pDevCtrl->umac->cmd |= (CMD_TX_EN | CMD_RX_EN);
 	pDevCtrl->dev_opened = 1;
 
+#ifdef CONFIG_BRCM_HAS_STANDBY
+	brcm_pm_wakeup_register(&bcmgenet_wakeup_ops, pDevCtrl, dev->name);
+	device_set_wakeup_capable(&dev->dev, 1);
+#endif
+
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_INT)
 		bcmgenet_power_up(pDevCtrl, GENET_POWER_PASSIVE);
+
 	return 0;
 err1:
 	free_irq(pDevCtrl->irq0, dev);
@@ -574,10 +664,31 @@ static int bcmgenet_close(struct net_device *dev)
 		del_timer_sync(&pDevCtrl->timer);
 		cancel_work_sync(&pDevCtrl->bcmgenet_link_work);
 	}
+	/*
+	 * Wait for pending work items to complete - we are stopping
+	 * the clock now. Since interrupts are disabled, no new work
+	 * will be scheduled.
+	 */
+	cancel_work_sync(&pDevCtrl->bcmgenet_irq_work);
+
+	if (brcm_pm_deep_sleep())
+		save_state(pDevCtrl);
+
 	pDevCtrl->dev_opened = 0;
-	if (pDevCtrl->phyType == BRCM_PHY_TYPE_INT)
+	if (device_may_wakeup(&dev->dev) && pDevCtrl->dev_asleep) {
+		if (pDevCtrl->wolopts & WAKE_MAGIC)
+			bcmgenet_power_down(pDevCtrl, GENET_POWER_WOL_MAGIC);
+		else if (pDevCtrl->wolopts & WAKE_ARP)
+			bcmgenet_power_down(pDevCtrl, GENET_POWER_WOL_ACPI);
+	}
+	else if (pDevCtrl->phyType == BRCM_PHY_TYPE_INT)
 		bcmgenet_power_down(pDevCtrl, GENET_POWER_PASSIVE);
-	clk_disable(pDevCtrl->clk);
+
+	if (pDevCtrl->wol_enabled)
+		clk_enable(pDevCtrl->clk_wol);
+
+	bcmgenet_clock_disable(pDevCtrl);
+
 	return 0;
 }
 
@@ -997,6 +1108,13 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	spin_lock_irqsave(&pDevCtrl->lock, flags);
 
+	if (!pDevCtrl->clock_active) {
+		printk(KERN_WARNING "%s: transmitting with gated clock!\n",
+		       dev_name(&dev->dev));
+		dev_kfree_skb_any(skb);
+		spin_unlock_irqrestore(&pDevCtrl->lock, flags);
+		return NETDEV_TX_OK;
+	}
 #if defined(CONFIG_BRCM_GENET_V2) && defined(CONFIG_NET_SCH_MULTIQ)
 	if (skb) {
 		index = skb_get_queue_mapping(skb);
@@ -1213,7 +1331,7 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 			printk(KERN_NOTICE "%s: frag%d len %d",
 					__func__, i, frag->size);
 			print_hex_dump(KERN_NOTICE, "", DUMP_PREFIX_ADDRESS,
-				16, 1
+				16, 1,
 				page_address(frag->page)+frag->page_offset,
 				frag->size, 0);
 #endif
@@ -1541,7 +1659,8 @@ static void bcmgenet_irq_task(struct work_struct *work)
 		pDevCtrl->intrl2_0->cpu_mask_set |= UMAC_IRQ_MPD_R;
 		/* disable CRC forward.*/
 		pDevCtrl->umac->cmd &= ~CMD_CRC_FWD;
-		bcmgenet_power_up(pDevCtrl, GENET_POWER_WOL_MAGIC);
+		if (pDevCtrl->dev_asleep)
+			bcmgenet_power_up(pDevCtrl, GENET_POWER_WOL_MAGIC);
 
 	} else if (pDevCtrl->irq0_stat & (UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM)) {
 		pDevCtrl->irq0_stat &= ~(UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM);
@@ -1550,7 +1669,8 @@ static void bcmgenet_irq_task(struct work_struct *work)
 		/* disable HFB match interrupts */
 		pDevCtrl->intrl2_0->cpu_mask_set |= (UMAC_IRQ_HFB_SM |
 				UMAC_IRQ_HFB_MM);
-		bcmgenet_power_up(pDevCtrl, GENET_POWER_WOL_ACPI);
+		if (pDevCtrl->dev_asleep)
+			bcmgenet_power_up(pDevCtrl, GENET_POWER_WOL_ACPI);
 	}
 
 	/* Link UP/DOWN event */
@@ -2090,6 +2210,39 @@ static int assign_rx_buffers(struct BcmEnet_devctrl *pDevCtrl)
 	return bdsfilled;
 }
 
+static void save_state(struct BcmEnet_devctrl *pDevCtrl)
+{
+	int ii;
+	volatile struct DmaDesc *rxBdAssignPtr = pDevCtrl->rxBds;
+
+	for (ii = 0; ii < pDevCtrl->nrRxBds; ++ii, ++rxBdAssignPtr) {
+		pDevCtrl->saved_rx_desc[ii].length_status =
+			rxBdAssignPtr->length_status;
+		pDevCtrl->saved_rx_desc[ii].address = rxBdAssignPtr->address;
+	}
+
+	pDevCtrl->int_mask = pDevCtrl->intrl2_0->cpu_mask_status;
+	pDevCtrl->rbuf_ctrl = pDevCtrl->rbuf->rbuf_ctrl;
+}
+
+static void restore_state(struct BcmEnet_devctrl *pDevCtrl)
+{
+	int ii;
+	volatile struct DmaDesc *rxBdAssignPtr = pDevCtrl->rxBds;
+
+	pDevCtrl->intrl2_0->cpu_mask_clear = 0xFFFFFFFF ^ pDevCtrl->int_mask;
+	pDevCtrl->rbuf->rbuf_ctrl = pDevCtrl->rbuf_ctrl;
+
+	for (ii = 0; ii < pDevCtrl->nrRxBds; ++ii, ++rxBdAssignPtr) {
+		rxBdAssignPtr->length_status =
+			pDevCtrl->saved_rx_desc[ii].length_status;
+		rxBdAssignPtr->address = pDevCtrl->saved_rx_desc[ii].address;
+	}
+
+	pDevCtrl->rxDma->rdma_ctrl |= DMA_EN;
+
+}
+
 /*
  * init_umac: Initializes the uniMac controller
  */
@@ -2099,7 +2252,7 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 	volatile struct intrl2Regs *intrl2;
 	struct net_device *dev = pDevCtrl->dev;
 
-	umac = pDevCtrl->umac;;
+	umac = pDevCtrl->umac;
 	intrl2 = pDevCtrl->intrl2_0;
 
 	TRACE(("bcmgenet: init_umac "));
@@ -2109,7 +2262,7 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 	udelay(10);
 
 	/* disable MAC while updating its registers */
-	umac->cmd = 0 ;
+	umac->cmd = 0;
 
 	/* issue soft reset, wait for it to complete */
 	umac->cmd = CMD_SW_RESET;
@@ -2541,7 +2694,8 @@ static int bcmgenet_init_dev(struct BcmEnet_devctrl *pDevCtrl)
 	volatile struct DmaDesc *lastBd;
 
 	pDevCtrl->clk = clk_get(&pDevCtrl->pdev->dev, "enet");
-	clk_enable(pDevCtrl->clk);
+	pDevCtrl->clk_wol = clk_get(&pDevCtrl->pdev->dev, "enet-wol");
+	bcmgenet_clock_enable(pDevCtrl);
 
 	TRACE(("%s\n", __func__));
 	/* setup buffer/pointer relationships here */
@@ -2583,7 +2737,7 @@ static int bcmgenet_init_dev(struct BcmEnet_devctrl *pDevCtrl)
 	/* alloc space for the tx control block pool */
 	ptxCbs = kmalloc(pDevCtrl->nrTxBds*sizeof(struct Enet_CB), GFP_KERNEL);
 	if (!ptxCbs) {
-		clk_disable(pDevCtrl->clk);
+		bcmgenet_clock_disable(pDevCtrl);
 		return -ENOMEM;
 	}
 	memset(ptxCbs, 0, pDevCtrl->nrTxBds*sizeof(struct Enet_CB));
@@ -2638,7 +2792,7 @@ error1:
 	kfree(prxCbs);
 error2:
 	kfree(ptxCbs);
-	clk_disable(pDevCtrl->clk);
+	bcmgenet_clock_disable(pDevCtrl);
 
 	TRACE(("%s Failed!\n", __func__));
 	return ret;
@@ -2840,12 +2994,33 @@ static inline unsigned int bcmgenet_getip(struct net_device *dev)
 				(!strcmp(pnet_device->name, dev->name))) {
 			struct in_device *pin_dev;
 			pin_dev = (struct in_device *)(pnet_device->ip_ptr);
-			ip = htonl(pin_dev->ifa_list->ifa_address);
+			if (pin_dev && pin_dev->ifa_list)
+				ip = htonl(pin_dev->ifa_list->ifa_address);
 			break;
 		}
 	}
 	read_unlock(&dev_base_lock);
 	return ip;
+}
+
+static void bcmgenet_clock_enable(struct BcmEnet_devctrl *pDevCtrl)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&pDevCtrl->lock, flags);
+	clk_enable(pDevCtrl->clk);
+	pDevCtrl->clock_active = 1;
+	spin_unlock_irqrestore(&pDevCtrl->lock, flags);
+}
+
+static void bcmgenet_clock_disable(struct BcmEnet_devctrl *pDevCtrl)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&pDevCtrl->lock, flags);
+	pDevCtrl->clock_active = 0;
+	clk_disable(pDevCtrl->clk);
+	spin_unlock_irqrestore(&pDevCtrl->lock, flags);
 }
 
 /*
@@ -2859,11 +3034,13 @@ static void bcmgenet_get_wol(struct net_device *dev,
 {
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	volatile struct uniMacRegs *umac = pDevCtrl->umac;
-	wol->supported = WAKE_MAGIC | WAKE_MAGICSECURE;
+	wol->supported = WAKE_MAGIC | WAKE_MAGICSECURE | WAKE_ARP;
 
-	if (umac->mpd_ctrl & MPD_EN)
-		wol->wolopts = WAKE_MAGIC;
-	if (umac->mpd_ctrl & MPD_PW_EN) {
+	if (!pDevCtrl->dev_opened)
+		return;
+
+	wol->wolopts = pDevCtrl->wolopts;
+	if (wol->wolopts & WAKE_MAGICSECURE) {
 		unsigned short pwd_ms;
 		unsigned long pwd_ls;
 		wol->wolopts |= WAKE_MAGICSECURE;
@@ -2884,34 +3061,18 @@ static int bcmgenet_set_wol(struct net_device *dev,
 {
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	volatile struct uniMacRegs *umac = pDevCtrl->umac;
-	unsigned int ip;
 
-	if (wol->wolopts & ~(WAKE_MAGIC | WAKE_MAGICSECURE))
+	if (wol->wolopts & ~(WAKE_MAGIC | WAKE_MAGICSECURE | WAKE_ARP))
 		return -EINVAL;
 
-	ip = bcmgenet_getip(dev);
-	if (ip  == 0) {
-		printk(KERN_WARNING "IP address is not set, can't put in WoL mode\n");
-		return -EINVAL;
-	} else {
-		hfb_arp[HFB_ARP_LEN-2] |= (ip >> 16);
-		hfb_arp[HFB_ARP_LEN-1] |= (ip & 0xFFFF);
-		/* Enable HFB, to response to ARP request.*/
-		if (bcmgenet_update_hfb(dev, hfb_arp, HFB_ARP_LEN, 0) < 0) {
-			printk(KERN_ERR "%s: Unable to update HFB\n", __func__);
-			return -EFAULT;
-		}
-		GENET_HFB_CTRL(pDevCtrl) |= RBUF_HFB_EN;
-	}
 	if (wol->wolopts & WAKE_MAGICSECURE) {
 		umac->mpd_pw_ls = *(unsigned long *)&wol->sopass[0];
 		umac->mpd_pw_ms = *(unsigned short *)&wol->sopass[4];
 		umac->mpd_ctrl |= MPD_PW_EN;
 	}
-	if (wol->wolopts & WAKE_MAGIC) {
-		/* Power down the umac, with magic packet mode.*/
-		bcmgenet_power_down(pDevCtrl, GENET_POWER_WOL_MAGIC);
-	}
+
+	device_set_wakeup_enable(&dev->dev, wol->wolopts);
+	pDevCtrl->wolopts = wol->wolopts;
 	return 0;
 }
 /*
@@ -3061,6 +3222,31 @@ static struct ethtool_ops bcmgenet_ethtool_ops = {
 	.set_sg				= bcmgenet_set_sg,
 	.get_link			= ethtool_op_get_link,
 };
+
+static int bcmgenet_enable_arp_filter(struct BcmEnet_devctrl *pDevCtrl)
+{
+	struct net_device *dev = pDevCtrl->dev;
+	unsigned int ip;
+
+	ip = bcmgenet_getip(dev);
+	if (ip) {
+		/* clear the lower halfwords */
+		hfb_arp[HFB_ARP_LEN-2] &= ~0xffff;
+		hfb_arp[HFB_ARP_LEN-1] &= ~0xffff;
+		hfb_arp[HFB_ARP_LEN-2] |= (ip >> 16);
+		hfb_arp[HFB_ARP_LEN-1] |= (ip & 0xFFFF);
+		/* Enable HFB, to response to ARP request.*/
+		if (bcmgenet_update_hfb(dev, hfb_arp, HFB_ARP_LEN, 0) < 0) {
+			printk(KERN_ERR "%s: Unable to update HFB\n",
+			       __func__);
+			return -1;
+		}
+		GENET_HFB_CTRL(pDevCtrl) |= RBUF_HFB_EN;
+		return 0;
+	}
+
+	return -1;
+}
 /*
  * Power down the unimac, based on mode.
  */
@@ -3091,37 +3277,62 @@ static void bcmgenet_power_down(struct BcmEnet_devctrl *pDevCtrl, int mode)
 #endif
 		break;
 	case GENET_POWER_WOL_MAGIC:
-		/* ENable CRC forward */
-		pDevCtrl->umac->cmd |= CMD_CRC_FWD;
+		/* disable RX while turning on MPD_EN */
+		pDevCtrl->umac->cmd &= ~CMD_RX_EN;
+		mdelay(10);
 		pDevCtrl->umac->mpd_ctrl |= MPD_EN;
 		while (!(pDevCtrl->rbuf->rbuf_status & RBUF_STATUS_WOL)) {
 			retries++;
 			if (retries > 5) {
-				printk(KERN_CRIT "bcmumac_power_down polling wol mode timeout\n");
+				printk(KERN_CRIT "%s: polling "
+				       "wol mode timeout\n", dev->name);
 				pDevCtrl->umac->mpd_ctrl &= ~MPD_EN;
 				return;
 			}
-			udelay(100);
+			mdelay(1);
 		}
-		/* Service Rx BD untill empty */
+		printk(KERN_DEBUG "%s: MP WOL-ready status set after "
+		       "%d msec\n", dev->name, retries);
+
+		/* Enable CRC forward */
+		pDevCtrl->umac->cmd |= CMD_CRC_FWD;
+		/* Receiver must be enabled for WOL MP detection */
+		pDevCtrl->umac->cmd |= CMD_RX_EN;
+
+		if (pDevCtrl->ext && pDevCtrl->dev_asleep)
+			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_ENERGY_DET_MASK;
+
 		pDevCtrl->intrl2_0->cpu_mask_clear |= UMAC_IRQ_MPD_R;
-		pDevCtrl->intrl2_0->cpu_mask_clear |= (UMAC_IRQ_HFB_MM |
-				UMAC_IRQ_HFB_SM);
-		break;
+
+		set_bit(GENET_POWER_WOL_MAGIC, &pDevCtrl->wol_enabled);
+		/* fall-through */
 	case GENET_POWER_WOL_ACPI:
+		if (bcmgenet_enable_arp_filter(pDevCtrl)) {
+			printk(KERN_CRIT "%s failed to set HFB filter\n",
+			       dev->name);
+			return;
+		}
+		pDevCtrl->umac->cmd &= ~CMD_RX_EN;
+		mdelay(10);
 		GENET_HFB_CTRL(pDevCtrl) |= RBUF_ACPI_EN;
 		while (!(pDevCtrl->rbuf->rbuf_status & RBUF_STATUS_WOL)) {
 			retries++;
 			if (retries > 5) {
-				printk(KERN_CRIT "bcmumac_power_down polling wol mode timeout\n");
+				printk(KERN_CRIT "%s polling "
+				       "wol mode timeout\n", dev->name);
 				GENET_HFB_CTRL(pDevCtrl) &= ~RBUF_ACPI_EN;
 				return;
 			}
-			udelay(100);
+			mdelay(1);
 		}
-		/* Service RX BD untill empty */
+		/* Receiver must be enabled for WOL ACPI detection */
+		pDevCtrl->umac->cmd |= CMD_RX_EN;
+		printk(KERN_DEBUG "%s: ACPI WOL-ready status set "
+		       "after %d msec\n", dev->name, retries);
+		/* Service RX BD until empty */
 		pDevCtrl->intrl2_0->cpu_mask_clear |= (UMAC_IRQ_HFB_MM |
 				UMAC_IRQ_HFB_SM);
+		set_bit(GENET_POWER_WOL_ACPI, &pDevCtrl->wol_enabled);
 		break;
 	case GENET_POWER_PASSIVE:
 		/* Power down LED */
@@ -3159,31 +3370,19 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 		break;
 	case GENET_POWER_WOL_MAGIC:
 		pDevCtrl->umac->mpd_ctrl &= ~MPD_EN;
-		/*
-		 * If ACPI is enabled at the same time, disable it, since
-		 * we have been waken up.
-		 */
-		if (!(GENET_HFB_CTRL(pDevCtrl) & RBUF_ACPI_EN)) {
-			GENET_HFB_CTRL(pDevCtrl) &= RBUF_ACPI_EN;
-			/* Stop monitoring ACPI interrupts */
-			pDevCtrl->intrl2_0->cpu_mask_set |= (UMAC_IRQ_HFB_SM |
-					UMAC_IRQ_HFB_MM);
-		}
-		bcmgenet_clear_hfb(pDevCtrl, CLEAR_ALL_HFB);
-		break;
+		/* Disable CRC Forward */
+		pDevCtrl->umac->cmd &= ~CMD_CRC_FWD;
+		/* Stop monitoring magic packet IRQ */
+		pDevCtrl->intrl2_0->cpu_mask_set |= UMAC_IRQ_MPD_R;
+		clear_bit(GENET_POWER_WOL_MAGIC, &pDevCtrl->wol_enabled);
+		/* fall through */
 	case GENET_POWER_WOL_ACPI:
 		GENET_HFB_CTRL(pDevCtrl) &= ~RBUF_ACPI_EN;
-		/*
-		 * If Magic packet is enabled at the same time, disable it,
-		 */
-		if (!(pDevCtrl->umac->mpd_ctrl & MPD_EN)) {
-			pDevCtrl->umac->mpd_ctrl &= ~MPD_EN;
-			/* Stop monitoring magic packet IRQ */
-			pDevCtrl->intrl2_0->cpu_mask_set |= UMAC_IRQ_MPD_R;
-			/* Disable CRC Forward */
-			pDevCtrl->umac->cmd &= ~CMD_CRC_FWD;
-		}
 		bcmgenet_clear_hfb(pDevCtrl, CLEAR_ALL_HFB);
+		/* Stop monitoring ACPI interrupts */
+		pDevCtrl->intrl2_0->cpu_mask_set |= (UMAC_IRQ_HFB_SM |
+				UMAC_IRQ_HFB_MM);
+		clear_bit(GENET_POWER_WOL_ACPI, &pDevCtrl->wol_enabled);
 		break;
 	case GENET_POWER_PASSIVE:
 		if (pDevCtrl->ext) {
@@ -3280,13 +3479,13 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 		printk(KERN_ERR "%s: can't get resources\n", __func__);
 		return -EIO;
 	}
-	res_size = mres->end - mres->start + 1;
+	res_size = resource_size(mres);
 	if (!request_mem_region(mres->start, res_size, CARDNAME)) {
 		printk(KERN_ERR "%s: can't request mem region: start: 0x%x size: %lu\n",
 				CARDNAME, mres->start, res_size);
 		return -ENODEV;
 	}
-	base = ioremap(mres->start, mres->end - mres->start + 1);
+	base = ioremap(mres->start, res_size);
 	TRACE(("%s: base=0x%x\n", __func__, (unsigned int)base));
 
 	if (!base) {
@@ -3342,7 +3541,7 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 		if (mii_probe(dev, cfg) < 0) {
 			printk(KERN_ERR "No PHY detected, not registering interface:%d\n",
 					pdev->id);
-			clk_disable(pDevCtrl->clk);
+			bcmgenet_clock_disable(pDevCtrl);
 			goto err1;
 		} else {
 			printk(KERN_CRIT "Found PHY at Address %d\n",
@@ -3380,12 +3579,12 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 
 	pDevCtrl->next_dev = eth_root_dev;
 	eth_root_dev = dev;
-	clk_disable(pDevCtrl->clk);
+	bcmgenet_clock_disable(pDevCtrl);
 
 	return 0;
 
 err2:
-	clk_disable(pDevCtrl->clk);
+	bcmgenet_clock_disable(pDevCtrl);
 	bcmgenet_uninit_dev(pDevCtrl);
 err1:
 	iounmap(base);
@@ -3408,22 +3607,11 @@ static int bcmgenet_drv_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int bcmgenet_drv_suspend(struct platform_device *pdev,
-	pm_message_t state)
+static int bcmgenet_drv_suspend(struct device *dev)
 {
 	int val = 0;
-#ifdef PM_WOL
-	struct ethtool_wolinfo wolinfo;
-#endif
-	struct BcmEnet_devctrl *pDevCtrl = dev_get_drvdata(&pdev->dev);
+	struct BcmEnet_devctrl *pDevCtrl = dev_get_drvdata(dev);
 
-#ifdef PM_WOL
-	wolinfo.wolopts = WAKE_MAGIC;
-
-	if (bcmgenet_set_wol(pDevCtrl->dev, &wolinfo) < 0)
-		printk(KERN_WARN "Device %s is not entering WoL mode\n",
-				pDevCtrl->dev->name);
-#endif
 	cancel_work_sync(&pDevCtrl->bcmgenet_irq_work);
 	if (pDevCtrl->dev_opened && !pDevCtrl->dev_asleep) {
 		pDevCtrl->dev_asleep = 1;
@@ -3434,41 +3622,36 @@ static int bcmgenet_drv_suspend(struct platform_device *pdev,
 		 * going into suspend mode.
 		 */
 		pDevCtrl->dev_opened = 1;
-	} else
-		val = 0;
+	}
 
 	return val;
 }
 
-static int bcmgenet_drv_resume(struct platform_device *pdev)
+static int bcmgenet_drv_resume(struct device *dev)
 {
 	int val = 0;
-	struct BcmEnet_devctrl *pDevCtrl = dev_get_drvdata(&pdev->dev);
+	struct BcmEnet_devctrl *pDevCtrl = dev_get_drvdata(dev);
 
 	if (pDevCtrl->dev_opened)
 		val = bcmgenet_open(pDevCtrl->dev);
-	else
-		val = 0;
-	if (pDevCtrl->dev_asleep)
-		pDevCtrl->dev_asleep = 0;
-
-#ifdef PM_WOL
-	/* wakeup from WoL mode */
-	bcmgenet_power_up(pDevCtrl, GENET_POWER_WOL_MAGIC);
-
-#endif
+	pDevCtrl->dev_asleep = 0;
 
 	return val;
 }
+
+static struct dev_pm_ops bcmgenet_pm_ops = {
+	.suspend		= bcmgenet_drv_suspend,
+	.resume			= bcmgenet_drv_resume,
+};
+
 
 static struct platform_driver bcmgenet_plat_drv = {
 	.probe =		bcmgenet_drv_probe,
 	.remove =		bcmgenet_drv_remove,
-	.suspend =		bcmgenet_drv_suspend,
-	.resume =		bcmgenet_drv_resume,
 	.driver = {
 		.name =		"bcmgenet",
 		.owner =	THIS_MODULE,
+		.pm =		&bcmgenet_pm_ops,
 	},
 };
 

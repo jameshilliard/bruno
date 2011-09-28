@@ -486,7 +486,7 @@ void __cpuinit brcm_tlb_init(void)
  * important structures to be allocated out of upper memory so
  * this happens early on.
  */
-asmlinkage __cpuinit void brcm_upper_tlb_setup(void)
+asmlinkage void brcm_upper_tlb_setup(void)
 {
 #ifdef CONFIG_BRCM_UPPER_MEMORY
 	int i, tlbsz;
@@ -751,7 +751,7 @@ void __iomem *plat_ioremap(phys_t offset, unsigned long size,
 
 	/* !XKS01, XKS01: uncached access to EBI/registers @ PA 1000_0000 */
 	if (offset >= 0x10000000 &&
-	    (offset + size) <= 0x1fffffff &&
+	    (offset + size) <= 0x20000000 &&
 	    flags == _CACHE_UNCACHED)
 		return (void *)(KSEG1 + offset);
 

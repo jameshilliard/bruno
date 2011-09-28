@@ -134,6 +134,17 @@ struct BcmEnet_devctrl {
 	int dev_opened;		/* device opened. */
 	int dev_asleep;		/* device is at sleep */
 	struct platform_device *pdev;
+
+	/* WOL */
+	unsigned long	wol_enabled;
+	struct	clk *clk_wol;
+	int	clock_active;
+	u32	wolopts;
+
+	/* S3 warm boot */
+	struct DmaDesc saved_rx_desc[TOTAL_DESC];
+	u32 int_mask;
+	u32 rbuf_ctrl;
 };
 
 #if defined(CONFIG_BCMGENET_DUMP_TRACE)
