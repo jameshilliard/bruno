@@ -72,6 +72,62 @@ static void ehci_brcm_shutdown(struct usb_hcd *hcd)
 		ehci_shutdown(hcd);
 }
 
+/* ehci_brcm_wait_for_sof
+ * Wait for start of next microframe, then wait extra delay microseconds
+ */
+static inline void ehci_brcm_wait_for_sof(struct ehci_hcd *ehci, u32 delay)
+{
+	int frame_idx = ehci_readl(ehci, &ehci->regs->frame_index);
+
+	while (frame_idx == ehci_readl(ehci, &ehci->regs->frame_index))
+		;
+	udelay(delay);
+}
+
+/* ehci_brcm_hub_control
+ * Intercept echi-hcd request to complete RESUME and align it to the start
+ * of the next microframe.
+ * If RESUME is complete too late in the microframe, host controller
+ * detects babble on suspended port and resets the port afterwards.
+ * This s/w workaround allows to avoid this problem.
+ * See http://jira.broadcom.com/browse/SWLINUX-1909 for more details
+ */
+static int ehci_brcm_hub_control(
+	struct usb_hcd	*hcd,
+	u16		typeReq,
+	u16		wValue,
+	u16		wIndex,
+	char		*buf,
+	u16		wLength)
+{
+	struct ehci_hcd	*ehci = hcd_to_ehci(hcd);
+	int		ports = HCS_N_PORTS(ehci->hcs_params);
+	u32 __iomem	*status_reg = &ehci->regs->port_status[
+				(wIndex & 0xff) - 1];
+	unsigned long flags;
+	int retval, irq_disabled = 0;
+
+	/* RESUME is cleared when GetPortStatus() is called 20ms after start
+	  of RESUME */
+	if ((typeReq == GetPortStatus) &&
+	    (wIndex && wIndex <= ports) &&
+	    ehci->reset_done[wIndex-1] &&
+	    time_after_eq(jiffies, ehci->reset_done[wIndex-1]) &&
+	    (ehci_readl(ehci, status_reg) & PORT_RESUME)) {
+		/* to make sure we are not interrupted until RESUME bit
+		  is cleared, disable interrupts on current CPU */
+		ehci_dbg(ehci, "SOF alignment workaround\n");
+		irq_disabled = 1;
+		local_irq_save(flags);
+		ehci_brcm_wait_for_sof(ehci, 5);
+	}
+
+	retval = ehci_hub_control(hcd, typeReq, wValue, wIndex, buf, wLength);
+	if (irq_disabled)
+		local_irq_restore(flags);
+	return retval;
+}
+
 #ifdef CONFIG_PM
 static int ehci_brcm_suspend(struct usb_hcd *hcd)
 {
@@ -89,6 +145,60 @@ static int ehci_brcm_resume(struct usb_hcd *hcd)
 	int ret = 0;
 
 	brcm_usb_resume(hcd);
+
+	if (brcm_pm_deep_sleep()) {
+		struct ehci_hcd	*ehci = hcd_to_ehci(hcd);
+
+		usb_root_hub_lost_power(hcd->self.root_hub);
+
+		/*
+		 * SWLINUX-1705: Avoid OUT packet underflows during high memory
+		 *   bus usage
+		 * port_status[0x0f] = Broadcom-proprietary USB_EHCI_INSNREG00
+		 * @ 0x90
+		 */
+		ehci_writel(ehci, 0x00800040, &ehci->regs->port_status[0x10]);
+		ehci_writel(ehci, 0x00000001, &ehci->regs->port_status[0x12]);
+
+		/* Else reset, to cope with power loss or flush-to-storage
+		 * style "resume" having let BIOS kick in during reboot.
+		 */
+		(void) ehci_halt(ehci);
+		(void) ehci_reset(ehci);
+		msleep(300);
+
+		ehci_writel(ehci, ehci->command, &ehci->regs->command);
+		ehci_writel(ehci, FLAG_CF, &ehci->regs->configured_flag);
+		/* unblock posted writes */
+		ehci_readl(ehci, &ehci->regs->command);
+
+		ehci_writel(ehci, 0, &ehci->regs->intr_enable);
+
+		/* re-init operational registers */
+		ehci_writel(ehci, 0, &ehci->regs->segment);
+		ehci_writel(ehci, ehci->periodic_dma, &ehci->regs->frame_list);
+		ehci_writel(ehci, (u32) ehci->async->qh_dma,
+			&ehci->regs->async_next);
+
+		/* restore CMD_RUN, framelist size, and irq threshold */
+		ehci_writel(ehci, ehci->command, &ehci->regs->command);
+
+		/* Some controller/firmware combinations need a delay during
+		 * which they set up the port statuses.  See Bugzilla #8190. */
+		/* SWLINUX-1929 need extra delay here */
+		msleep(300);
+
+		ehci->next_statechange = jiffies + msecs_to_jiffies(5);
+		hcd->state = HC_STATE_RUNNING;
+
+		/* Now we can safely re-enable irqs */
+		ehci_writel(ehci, INTR_MASK, &ehci->regs->intr_enable);
+
+		/* here we "know" root ports should always stay powered */
+		ehci_port_power(ehci, 1);
+
+		return 0;
+	}
 	ehci_prepare_ports_for_controller_resume(hcd_to_ehci(hcd));
 	ret = ehci_bus_resume(hcd);
 	return ret;
@@ -134,7 +244,7 @@ static const struct hc_driver ehci_brcm_hc_driver = {
 	 * root hub support
 	 */
 	.hub_status_data =	ehci_hub_status_data,
-	.hub_control =		ehci_hub_control,
+	.hub_control =		ehci_brcm_hub_control,
 #ifdef	CONFIG_PM
 	.bus_suspend =		ehci_brcm_suspend,
 	.bus_resume =		ehci_brcm_resume,
