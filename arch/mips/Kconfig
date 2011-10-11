@@ -108,7 +108,6 @@ config BRCMSTB
 	  This enables support for Broadcom set-top box, digital TV,
 	  and DVD chipsets.
 
-
 config MIPS_COBALT
 	bool "Cobalt Server"
 	select CEVT_R4K
@@ -741,6 +740,8 @@ source "arch/mips/loongson/Kconfig"
 endmenu
 
 source "arch/mips/brcmstb/Kconfig"
+source "arch/mips/bruno/Kconfig"
+
 
 config RWSEM_GENERIC_SPINLOCK
 	bool

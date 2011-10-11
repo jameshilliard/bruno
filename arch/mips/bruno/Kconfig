@@ -1,0 +1,57 @@
+config BRUNO
+	bool "BRUNO Platform"
+	default y
+	help
+	  This enables support for BRUNO platform.
+
+menu "Bruno options"
+	depends on BRUNO
+
+#####################################################################
+# User options: board selection
+#####################################################################
+
+choice
+	prompt "Board selection"
+	depends on BRUNO
+	help
+	  Select the Bruno board you are building for.
+
+config BRUNO_GFHD100
+	bool "GFHD100"
+	select BRUNO_PLATFORM_DEFAULTS
+
+endchoice
+
+endmenu
+
+config BRUNO_PLATFORM_DEFAULTS
+	bool
+	select BCMGENET_0_GPHY
+	select BRCM_OVERRIDE_USB
+	select BRCM_FORCE_USB_PWR_HI
+	select BRCM_FORCE_USB_OC_LO
+	select MEDIA_SUPPORT
+	select SND
+	select SND_DRIVERS
+	select SND_HWDEP
+	select SND_MIPS
+	select SND_PCM
+	select SND_RAWMIDI
+	select SND_SPI
+	select SND_TIMER
+	select SND_VERBOSE_PROCFS
+	select SND_USB
+	select SND_USB_AUDIO
+	select SOUND
+	select USB_VIDEO_CLASS
+	select USB_VIDEO_CLASS_INPUT_EVDEV
+	select V4L_USB_DRIVERS
+	select VIDEO_CAPTURE_DRIVERS
+	select VIDEO_DEV
+	select VIDEO_MEDIA
+	select VIDEO_USB_DRIVERS
+	select VIDEO_V4L2
+	select VIDEO_V4L2_COMMON
+	# select ARCH_SUSPEND_POSSIBLE
+
