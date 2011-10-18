@@ -738,37 +738,49 @@ static int __initdata nandcs[NUM_CS];
  ***********************************************************************/
 #ifdef CONFIG_BRUNO
 #ifdef CONFIG_BRUNO_GFHD100
+#define BRUNO_CFE_NAME         "cfe"
+#define BRUNO_RESERVED0_NAME   "reserve0"
+#define BRUNO_ALL_NAME         "all"
+
 #define BRUNO_KERNEL0_NAME     "kernel0"
 #define BRUNO_KERNEL1_NAME     "kernel1"
 #define BRUNO_ROOTFS0_NAME     "rootfs0"
 #define BRUNO_ROOTFS1_NAME     "rootfs1"
 #define BRUNO_USER_NAME        "user"
+#define BRUNO_CONFIG_NAME      "config"
 #define BRUNO_CHECKSUM_NAME    "checksum"
+
+#define BRUNO_CFE_SIZE         0x00200000
+#define BRUNO_RESERVED0_SIZE   0x00200000
+#define BRUNO_ALL_SIZE         0x00400000
 
 #define BRUNO_KERNEL0_SIZE     0x02000000
 #define BRUNO_KERNEL1_SIZE     0x02000000
-#define BRUNO_ROOTFS0_SIZE     0x10000000
-#define BRUNO_ROOTFS1_SIZE     0x10000000
+#define BRUNO_ROOTFS0_SIZE     0x20000000
+#define BRUNO_ROOTFS1_SIZE     0x20000000
 #define BRUNO_USER_SIZE        0x10000000
+#define BRUNO_CONFIG_SIZE      0x10000000
 #define BRUNO_CHECKSUM_SIZE    0x00400000
+
+#define BRUNO_CFE_OFFSET       0x00000000
+#define BRUNO_RESERVED0_OFFSET (BRUNO_CFE_OFFSET+BRUNO_CFE_SIZE)
+#define BRUNO_ALL_OFFSET       0x00000000
 
 #define BRUNO_KERNEL0_OFFSET   0x00000000
 #define BRUNO_KERNEL1_OFFSET   (BRUNO_KERNEL0_OFFSET+BRUNO_KERNEL0_SIZE)
 #define BRUNO_ROOTFS0_OFFSET   (BRUNO_KERNEL1_OFFSET+BRUNO_KERNEL1_SIZE)
 #define BRUNO_ROOTFS1_OFFSET   (BRUNO_ROOTFS0_OFFSET+BRUNO_ROOTFS0_SIZE)
 #define BRUNO_USER_OFFSET      (BRUNO_ROOTFS1_OFFSET+BRUNO_ROOTFS1_SIZE)
-#define BRUNO_CHECKSUM_OFFSET  (BRUNO_USER_OFFSET+BRUNO_USER_SIZE)
+#define BRUNO_CONFIG_OFFSET    (BRUNO_USER_OFFSET+BRUNO_USER_SIZE)
+#define BRUNO_CHECKSUM_OFFSET  (BRUNO_CONFIG_OFFSET+BRUNO_CONFIG_SIZE)
 #endif /* CONFIG_BRUNO_GFHD100 */
 
 /* Partition map */
 static struct mtd_partition fixed_nor_partition_map[] =
 {
-  {   name: BRUNO_KERNEL0_NAME, size: BRUNO_KERNEL0_SIZE, offset: BRUNO_KERNEL0_OFFSET },
-  {   name: BRUNO_KERNEL1_NAME, size: BRUNO_KERNEL1_SIZE, offset: BRUNO_KERNEL1_OFFSET },
-  {   name: BRUNO_ROOTFS0_NAME, size: BRUNO_ROOTFS0_SIZE, offset: BRUNO_ROOTFS0_OFFSET },
-  {   name: BRUNO_ROOTFS1_NAME, size: BRUNO_ROOTFS1_SIZE, offset: BRUNO_ROOTFS1_OFFSET },
-  {   name: BRUNO_USER_NAME, size: BRUNO_USER_SIZE, offset: BRUNO_USER_OFFSET },
-  {   name: BRUNO_CHECKSUM_NAME, size: BRUNO_CHECKSUM_SIZE, offset: BRUNO_CHECKSUM_OFFSET }
+  {   name: BRUNO_CFE_NAME, size: BRUNO_CFE_SIZE, offset: BRUNO_CFE_OFFSET },
+  {   name: BRUNO_RESERVED0_NAME, size: BRUNO_RESERVED0_SIZE, offset: BRUNO_RESERVED0_OFFSET },
+  {   name: BRUNO_ALL_NAME, size: BRUNO_ALL_SIZE, offset: BRUNO_ALL_OFFSET },
 };
 
 static struct mtd_partition fixed_nand_partition_map[] =
@@ -778,6 +790,7 @@ static struct mtd_partition fixed_nand_partition_map[] =
   {   name: BRUNO_ROOTFS0_NAME, size: BRUNO_ROOTFS0_SIZE, offset: BRUNO_ROOTFS0_OFFSET },
   {   name: BRUNO_ROOTFS1_NAME, size: BRUNO_ROOTFS1_SIZE, offset: BRUNO_ROOTFS1_OFFSET },
   {   name: BRUNO_USER_NAME, size: BRUNO_USER_SIZE, offset: BRUNO_USER_OFFSET },
+  {   name: BRUNO_CONFIG_NAME, size: BRUNO_CONFIG_SIZE, offset: BRUNO_CONFIG_OFFSET },
   {   name: BRUNO_CHECKSUM_NAME, size: BRUNO_CHECKSUM_SIZE, offset: BRUNO_CHECKSUM_OFFSET }
 };
 #endif /* CONFIG_BRUNO */
@@ -896,6 +909,7 @@ static int __init brcmstb_mtd_setup(void)
 			switch( cs_info[i].type )
 			{
 				case TYPE_NOR :
+				case TYPE_SPI :
 					brcm_setup_cs(i, ARRAY_SIZE(fixed_nor_partition_map), &fixed_nor_partition_map[0]);
 					break;
 				case TYPE_NAND :
