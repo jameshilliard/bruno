@@ -1858,8 +1858,8 @@ CONFIG_TRACING_SUPPORT=y
 # CONFIG_SAMPLES is not set
 CONFIG_HAVE_ARCH_KGDB=y
 CONFIG_EARLY_PRINTK=y
-CONFIG_CMDLINE_BOOL=y
-CONFIG_CMDLINE="root=/dev/nfs rw nfsroot=192.168.1.10:/usr/local/google/tftpboot/brunonfsroot ip=192.168.1.12:192.168.1.10:192.168.1.10:255.255.255.0:bruno:eth0:off"
+# CONFIG_CMDLINE_BOOL is not set
+# CONFIG_CMDLINE is not set
 # CONFIG_CMDLINE_OVERRIDE is not set
 # CONFIG_SPINLOCK_TEST is not set
 
