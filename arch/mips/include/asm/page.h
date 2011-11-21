@@ -249,6 +249,8 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 /* #define UNCAC_ADDR(addr)	(addr) */
 #define CAC_ADDR(addr)		(addr)
 
+#define CAC_ADDR(addr)		({ BUG(); NULL; })
+
 #else
 #define UNCAC_ADDR(addr)	((addr) - PAGE_OFFSET + UNCAC_BASE + 	\
 								PHYS_OFFSET)
