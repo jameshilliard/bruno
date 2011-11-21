@@ -21,8 +21,8 @@
  * file. You must edit the source file for changes to be made to this file.
  *
  *
- * Date:           Generated on         Mon Apr 11 12:27:26 2011
- *                 MD5 Checksum         8cf142ad25caa9f873c54e8bb2bb1755
+ * Date:           Generated on         Tue Oct 11 08:31:06 2011
+ *                 MD5 Checksum         12f5dd38e0ec050efd2afb0b1c62e9d9
  *
  * Compiled with:  RDB Utility          combo_header.pl
  *                 RDB Parser           3.0
@@ -32,10 +32,7 @@
  *
  * Revision History:
  *
- * $brcm_Log: /magnum/basemodules/chp/7425/rdb/b0/bchp_usb_ctrl.h $
- * 
- * Hydra_Software_Devel/2   4/12/11 4:40p vanessah
- * SW7425-112: Update rdb files for 7425 B0.
+ * $brcm_Log: $
  *
  ***************************************************************************/
 
@@ -74,10 +71,20 @@
 #define BCHP_USB_CTRL_SETUP_SRAM_CS_DIS_SHIFT                      25
 #define BCHP_USB_CTRL_SETUP_SRAM_CS_DIS_DEFAULT                    0
 
-/* USB_CTRL :: SETUP :: SETUP_SPARE [24:13] */
-#define BCHP_USB_CTRL_SETUP_SETUP_SPARE_MASK                       0x01ffe000
-#define BCHP_USB_CTRL_SETUP_SETUP_SPARE_SHIFT                      13
+/* USB_CTRL :: SETUP :: SETUP_SPARE [24:15] */
+#define BCHP_USB_CTRL_SETUP_SETUP_SPARE_MASK                       0x01ff8000
+#define BCHP_USB_CTRL_SETUP_SETUP_SPARE_SHIFT                      15
 #define BCHP_USB_CTRL_SETUP_SETUP_SPARE_DEFAULT                    0
+
+/* USB_CTRL :: SETUP :: scb1_en [14:14] */
+#define BCHP_USB_CTRL_SETUP_scb1_en_MASK                           0x00004000
+#define BCHP_USB_CTRL_SETUP_scb1_en_SHIFT                          14
+#define BCHP_USB_CTRL_SETUP_scb1_en_DEFAULT                        0
+
+/* USB_CTRL :: SETUP :: scb_client_swap [13:13] */
+#define BCHP_USB_CTRL_SETUP_scb_client_swap_MASK                   0x00002000
+#define BCHP_USB_CTRL_SETUP_scb_client_swap_SHIFT                  13
+#define BCHP_USB_CTRL_SETUP_scb_client_swap_DEFAULT                0
 
 /* USB_CTRL :: SETUP :: async_expire_dis [12:12] */
 #define BCHP_USB_CTRL_SETUP_async_expire_dis_MASK                  0x00001000
@@ -175,7 +182,7 @@
 /* USB_CTRL :: PLL_CTL :: PLL_Ka [26:24] */
 #define BCHP_USB_CTRL_PLL_CTL_PLL_Ka_MASK                          0x07000000
 #define BCHP_USB_CTRL_PLL_CTL_PLL_Ka_SHIFT                         24
-#define BCHP_USB_CTRL_PLL_CTL_PLL_Ka_DEFAULT                       3
+#define BCHP_USB_CTRL_PLL_CTL_PLL_Ka_DEFAULT                       1
 
 /* USB_CTRL :: PLL_CTL :: PLLCTL_SPARE3 [23:23] */
 #define BCHP_USB_CTRL_PLL_CTL_PLLCTL_SPARE3_MASK                   0x00800000
@@ -185,12 +192,12 @@
 /* USB_CTRL :: PLL_CTL :: PLL_Ki [22:20] */
 #define BCHP_USB_CTRL_PLL_CTL_PLL_Ki_MASK                          0x00700000
 #define BCHP_USB_CTRL_PLL_CTL_PLL_Ki_SHIFT                         20
-#define BCHP_USB_CTRL_PLL_CTL_PLL_Ki_DEFAULT                       3
+#define BCHP_USB_CTRL_PLL_CTL_PLL_Ki_DEFAULT                       2
 
 /* USB_CTRL :: PLL_CTL :: PLL_Kp [19:16] */
 #define BCHP_USB_CTRL_PLL_CTL_PLL_Kp_MASK                          0x000f0000
 #define BCHP_USB_CTRL_PLL_CTL_PLL_Kp_SHIFT                         16
-#define BCHP_USB_CTRL_PLL_CTL_PLL_Kp_DEFAULT                       10
+#define BCHP_USB_CTRL_PLL_CTL_PLL_Kp_DEFAULT                       7
 
 /* USB_CTRL :: PLL_CTL :: PLLCTL_SPARE2 [15:15] */
 #define BCHP_USB_CTRL_PLL_CTL_PLLCTL_SPARE2_MASK                   0x00008000
@@ -210,7 +217,7 @@
 /* USB_CTRL :: PLL_CTL :: PLL_ndiv [09:00] */
 #define BCHP_USB_CTRL_PLL_CTL_PLL_ndiv_MASK                        0x000003ff
 #define BCHP_USB_CTRL_PLL_CTL_PLL_ndiv_SHIFT                       0
-#define BCHP_USB_CTRL_PLL_CTL_PLL_ndiv_DEFAULT                     40
+#define BCHP_USB_CTRL_PLL_CTL_PLL_ndiv_DEFAULT                     80
 
 /***************************************************************************
  *FLADJ_VALUE - Frame Adjust Value
