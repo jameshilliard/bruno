@@ -246,8 +246,7 @@ typedef struct { unsigned long pgprot; } pgprot_t;
 })
 #elif defined(CONFIG_BRCM_UPPER_768MB)
 
-/* #define UNCAC_ADDR(addr)	(addr) */
-#define CAC_ADDR(addr)		(addr)
+/* uncached kseg1 does not exist in this configuration */
 
 #define CAC_ADDR(addr)		({ BUG(); NULL; })
 
