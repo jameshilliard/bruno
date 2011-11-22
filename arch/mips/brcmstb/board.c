@@ -34,6 +34,7 @@ int brcm_docsis_platform;
 int brcm_enet_no_mdio;
 int brcm_enet0_force_ext_mii;
 char brcm_cfe_boardname[CFE_STRING_SIZE];
+char brcm_platform_name[CFE_STRING_SIZE];
 
 /* MTD partition layout */
 unsigned long brcm_mtd_rootfs_start;

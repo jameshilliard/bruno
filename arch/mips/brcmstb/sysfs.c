@@ -251,6 +251,13 @@ static ssize_t show_zscm_regs(struct device *dev,
 }
 #endif
 
+static ssize_t show_platform_name(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%s\n", brcm_platform_name);
+}
+
+
 static struct device_attribute brcmstb_attr_list[] = {
 	__ATTR(unaligned_fp_count, 0444, show_unaligned_fp_count, NULL),
 	__ATTR(rdhwr_count, 0444, show_rdhwr_count, NULL),
@@ -297,6 +304,7 @@ static struct device_attribute brcmstb_attr_list[] = {
 #endif
 	__ATTR(halt_mode, 0644, brcm_pm_show_halt_mode,
 		brcm_pm_store_halt_mode),
+	__ATTR(platform_name, 0444, show_platform_name, NULL),
 	__ATTR_NULL,
 };
 

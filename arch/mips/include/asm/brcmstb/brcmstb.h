@@ -1093,6 +1093,7 @@ extern unsigned long brcm_base_baud;
 
 extern char brcm_mtd_flash_type[CFE_STRING_SIZE];
 extern char brcm_cfe_boardname[CFE_STRING_SIZE];
+extern char brcm_platform_name[CFE_STRING_SIZE];
 
 extern unsigned long brcm_moca_i2c_base;
 extern unsigned long brcm_moca_rf_band;

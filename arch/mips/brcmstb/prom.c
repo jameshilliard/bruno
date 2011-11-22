@@ -271,6 +271,7 @@ static void __init __maybe_unused cfe_read_configuration(void)
 	FETCH("OCAP_PART_SIZE", parse_hex, &brcm_mtd_ocap_len);
 	FETCH("FLASH_SIZE", parse_ulong, &brcm_mtd_flash_size_mb);
 	FETCH("FLASH_TYPE", parse_string, brcm_mtd_flash_type);
+	FETCH("PLATFORM_NAME", parse_string, brcm_platform_name);
 
 	printk(KERN_CONT "found %d vars.\n", fetched);
 }
