@@ -185,4 +185,14 @@ struct BcmEnet_devctrl {
 
 #endif /* CONFIG_BRCM_GENET_VERSION > 1 */
 
+#if 1 //nhlee moca patch code
+#if CONFIG_BRCM_GENET_VERSION < 3
+#define GENET_BP_IN_EN_SHIFT			16
+#define GENET_BP_MASK				0xffff
+#else
+#define GENET_BP_IN_EN_SHIFT			17
+#define GENET_BP_MASK				0x1ffff
+#endif
+#endif
+
 #endif /* __BCMGENET_H__ */

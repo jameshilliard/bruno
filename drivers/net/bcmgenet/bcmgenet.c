@@ -2318,10 +2318,21 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 				UMAC_IRQ_LINK_UP);
 
 	} else if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
+#if 1 // nhlee moca patch code
+		/*bp_in_en: back-pressure enable */
+		GENET_TBUF_BP_MC(pDevCtrl) |= BIT(GENET_BP_IN_EN_SHIFT);
+#if defined(CONFIG_NET_SCH_MULTIQ)
+		GENET_TBUF_BP_MC(pDevCtrl) |= GENET_BP_MASK;
+#else
+		GENET_TBUF_BP_MC(pDevCtrl) &= ~GENET_BP_MASK;
+#endif
+
+#else
 		/*bp_in_en: back-pressure enable */
 		GENET_TBUF_BP_MC(pDevCtrl) |= (1 << 16);
 		/* bp_mask: back pressure mask */
 		GENET_TBUF_BP_MC(pDevCtrl) &= 0xFFFF0000;
+#endif
 	}
 
 	/* Enable rx/tx engine.*/
