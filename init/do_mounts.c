@@ -20,6 +20,7 @@
 #include <linux/nfs_fs.h>
 #include <linux/nfs_fs_sb.h>
 #include <linux/nfs_mount.h>
+#include <linux/mtd/mtd.h>
 
 #include "do_mounts.h"
 
@@ -456,8 +457,18 @@ void __init prepare_namespace(void)
 
 	if (saved_root_name[0]) {
 		root_device_name = saved_root_name;
-		if (!strncmp(root_device_name, "mtd", 3) ||
-		    !strncmp(root_device_name, "ubi", 3)) {
+		if (!strncmp(root_device_name, "mtdblock:", 9)) {
+			struct mtd_info *mtd = get_mtd_device_nm(root_device_name + 9);
+			if (!IS_ERR(mtd))
+				sprintf(root_device_name, "/dev/mtdblock%d", mtd->index);
+			else {
+				printk(KERN_ERR "VFS: Unable to find mtd \"%s\"\n", root_device_name + 9);
+				printk("List of all partitions:\n");
+				printk_all_partitions();
+				panic("VFS: Unable to mount root fs");
+			}
+		} else if (!strncmp(root_device_name, "mtd", 3) ||
+		           !strncmp(root_device_name, "ubi", 3)) {
 			mount_block_root(root_device_name, root_mountflags);
 			goto out;
 		}
