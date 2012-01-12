@@ -390,11 +390,9 @@ struct rDmaRegs {
 #endif
 	unsigned long rdma_ctrl;
 	unsigned long rdma_status;
-        /* :TODO: (Google) This unused should be removed. It is inconsistent
-         * with register map and caused the rest of the parameters to be
-         * populated incorrectly. We will notify BRCM to modify it and before
-         * BRCM corrects this, we will keep this patch. */
-	/* unsigned long unused; */
+#if CONFIG_BRCM_GENET_VERSION < 2
+	unsigned long unused;
+#endif
 	unsigned long rdma_scb_burst_size;
 	unsigned long rdma_activity;
 	unsigned long rdma_mask;

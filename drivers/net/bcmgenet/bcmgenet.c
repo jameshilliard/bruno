@@ -682,8 +682,7 @@ static int bcmgenet_close(struct net_device *dev)
 			bcmgenet_power_down(pDevCtrl, GENET_POWER_WOL_MAGIC);
 		else if (pDevCtrl->wolopts & WAKE_ARP)
 			bcmgenet_power_down(pDevCtrl, GENET_POWER_WOL_ACPI);
-	}
-	else if (pDevCtrl->phyType == BRCM_PHY_TYPE_INT)
+	} else if (pDevCtrl->phyType == BRCM_PHY_TYPE_INT)
 		bcmgenet_power_down(pDevCtrl, GENET_POWER_PASSIVE);
 
 	if (pDevCtrl->wol_enabled)
@@ -707,7 +706,8 @@ static void bcmgenet_timeout(struct net_device *dev)
 	dev->trans_start = jiffies;
 
 	dev->stats.tx_errors++;
-	netif_wake_queue(dev);
+
+	netif_tx_wake_all_queues(dev);
 }
 
 /* --------------------------------------------------------------------------
@@ -1070,7 +1070,7 @@ static void bcmgenet_tx_reclaim(struct net_device *dev, int index)
 	} else{
 		if (pDevCtrl->txRingFreeBds[index] > (MAX_SKB_FRAGS + 1)
 			&& __netif_subqueue_stopped(dev, index)) {
-			netif_wake_subqueue(dev, index);
+			netif_wake_subqueue(dev, index+1);
 		}
 		pDevCtrl->txRingCIndex[index] = c_index;
 	}
@@ -1150,7 +1150,7 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 				return 1;
 			}
 		} else if (pDevCtrl->txRingFreeBds[index] <= nr_frags + 1) {
-			netif_stop_subqueue(dev, index);
+			netif_stop_subqueue(dev, index+1);
 			spin_unlock_irqrestore(&pDevCtrl->lock, flags);
 			printk(KERN_ERR "%s: tx ring %d full when queue awake\n",
 					__func__, index);
@@ -1366,7 +1366,7 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 		if (pDevCtrl->txFreeBds <= (MAX_SKB_FRAGS + 1))
 			netif_stop_subqueue(dev, 0);
 	} else if (pDevCtrl->txRingFreeBds[index] <= (MAX_SKB_FRAGS + 1)) {
-		netif_stop_subqueue(dev, index);
+		netif_stop_subqueue(dev, index+1);
 	}
 	/* Enable Tx bdone/pdone interrupt if any subqueue is stopped*/
 	if (netif_any_subqueue_stopped(dev))
@@ -2318,20 +2318,13 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 				UMAC_IRQ_LINK_UP);
 
 	} else if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
-#if 1 // nhlee moca patch code
-		/*bp_in_en: back-pressure enable */
 		GENET_TBUF_BP_MC(pDevCtrl) |= BIT(GENET_BP_IN_EN_SHIFT);
+
+		/* bp_mask: back pressure mask */
 #if defined(CONFIG_NET_SCH_MULTIQ)
 		GENET_TBUF_BP_MC(pDevCtrl) |= GENET_BP_MASK;
 #else
 		GENET_TBUF_BP_MC(pDevCtrl) &= ~GENET_BP_MASK;
-#endif
-
-#else
-		/*bp_in_en: back-pressure enable */
-		GENET_TBUF_BP_MC(pDevCtrl) |= (1 << 16);
-		/* bp_mask: back pressure mask */
-		GENET_TBUF_BP_MC(pDevCtrl) &= 0xFFFF0000;
 #endif
 	}
 
@@ -2900,12 +2893,12 @@ int bcmgenet_update_hfb(struct net_device *dev, unsigned int *data,
 	TRACE(("Updating HFB len=0x%d\n", len));
 
 	count = HFB_NUM_FLTRS;
-	offset = 128;
+	offset = 64;
 	if (GENET_HFB_CTRL(pDevCtrl) & RBUF_HFB_256B) {
 #if CONFIG_BRCM_GENET_VERSION < 3
 		count >>= 1;
 #endif
-		offset = 256;
+		offset = 128;
 	}
 
 	if (len > offset)
@@ -3124,6 +3117,8 @@ static int bcmgenet_get_settings(struct net_device *dev,
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	int rc = 0;
 
+	if (!netif_running(dev))
+		return -EINVAL;
 	/* override autoneg on MoCA interface to return link up/down */
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
 		cmd->autoneg = netif_carrier_ok(pDevCtrl->dev);
@@ -3145,6 +3140,8 @@ static int bcmgenet_set_settings(struct net_device *dev,
 	int err = 0;
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 
+	if (!netif_running(dev))
+		return -EINVAL;
 	/* override autoneg on MoCA interface to set link up/down */
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
 		if ((cmd->autoneg == 0) && (netif_carrier_ok(pDevCtrl->dev))) {
@@ -3453,6 +3450,8 @@ static int bcmgenet_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	struct acpi_data *u_data;
 	int val = 0;
 
+	if (!netif_running(dev))
+		return -EINVAL;
 	/* we can add sub-command in ifr_data if we need to in the future */
 	switch (cmd) {
 	case SIOCSACPISET:

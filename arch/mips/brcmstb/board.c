@@ -34,7 +34,6 @@ int brcm_docsis_platform;
 int brcm_enet_no_mdio;
 int brcm_enet0_force_ext_mii;
 char brcm_cfe_boardname[CFE_STRING_SIZE];
-char brcm_platform_name[CFE_STRING_SIZE];
 
 /* MTD partition layout */
 unsigned long brcm_mtd_rootfs_start;
@@ -290,24 +289,41 @@ void board_pinmux_setup(void)
 	PINMUX(14, sgpio_01, 1);
 	brcm_moca_i2c_base = BPHYSADDR(BCHP_BSCA_REG_START);
 
-#elif defined(CONFIG_BCM7342)
-
-	PINMUX(10, gpio_023, 1);	/* ENET LEDs */
-	PINMUX(11, gpio_024, 1);
-
-	PINMUX(23, vo_656_7, 1);	/* MoCA LEDs */
-	PINMUX(23, vo_656_clk, 1);
-
-	PINMUX(12, gpio_034, 1);	/* UARTB TX */
-	PINMUX(12, gpio_035, 1);	/* UARTB RX */
-	PINMUX(12, gpio_038, 1);	/* UARTC TX */
-	PINMUX(12, gpio_039, 1);	/* UARTC RX */
-
-	PINMUX(21, sgpio_02, 1);	/* MoCA I2C on BSCB */
-	PINMUX(21, sgpio_03, 1);
-	brcm_moca_i2c_base = BPHYSADDR(BCHP_BSCB_REG_START);
-
 #elif defined(CONFIG_BCM7344)
+
+	PINMUX(15, gpio_79, 1);		/* MoCA link */
+	PINMUX(15, gpio_80, 1);		/* MoCA activity */
+
+	PINMUX(17, uart_rxdb, 0);	/* UARTB RX */
+
+#ifdef CONFIG_BCM7344A0
+	PINMUX(18, uart_txdb, 0);	/* UARTB TX */
+#else
+	PINMUX(17, uart_txdb, 0);	/* UARTB TX */
+
+	PINMUX(0, gpio_68, 3);		/* SDIO */
+	PINMUX(0, gpio_69, 3);
+	PINMUX(0, gpio_70, 3);
+	PINMUX(0, gpio_71, 2);
+	PINMUX(0, gpio_72, 2);
+	PINMUX(0, gpio_73, 2);
+	PINMUX(0, gpio_74, 2);
+	PINMUX(0, gpio_75, 2);
+	PINMUX(1, gpio_76, 2);
+	PINMUX(1, gpio_77, 2);
+
+	/* enable pullup on SDIO lines */
+	PADCTRL(0, gpio_68_pad_ctrl, 2);
+	PADCTRL(0, gpio_69_pad_ctrl, 2);
+	PADCTRL(0, gpio_70_pad_ctrl, 2);
+	PADCTRL(0, gpio_71_pad_ctrl, 2);
+	PADCTRL(0, gpio_72_pad_ctrl, 2);
+	PADCTRL(0, gpio_73_pad_ctrl, 2);
+	PADCTRL(0, gpio_74_pad_ctrl, 2);
+	PADCTRL(0, gpio_75_pad_ctrl, 2);
+	PADCTRL(0, gpio_76_pad_ctrl, 2);
+	PADCTRL(0, gpio_77_pad_ctrl, 2);
+#endif
 
 	PINMUX(15, gpio_79, 1);		/* MoCA link */
 	PINMUX(15, gpio_80, 1);		/* MoCA activity */
@@ -396,6 +412,25 @@ void board_pinmux_setup(void)
 	PINMUX(16, sgpio_02, 1);	/* MoCA I2C on BSCB */
 	PINMUX(16, sgpio_03, 1);
 	brcm_moca_i2c_base = BPHYSADDR(BCHP_BSCB_REG_START);
+
+#if !defined(CONFIG_BCM7346A0)
+	/*
+	 * To enable SDIO_LED (activity LED) on the BCM97346 reference boards:
+	 * install R1127, remove R1120, uncomment this line, and don't use MoCA
+	 */
+	/* PINMUX(16, sgpio_02, 3); */
+
+	PINMUX(17, vo_656_5, 2);	/* SDIO_PRES */
+	PINMUX(17, vo_656_4, 1);	/* SDIO_PWR0 */
+	PINMUX(17, vo_656_3, 2);	/* SDIO_DAT3 */
+	PINMUX(17, vo_656_2, 2);	/* SDIO_DAT1 */
+	PINMUX(17, vo_656_1, 2);	/* SDIO_DAT1 */
+	PINMUX(17, vo_656_0, 2);	/* SDIO_DAT0 */
+
+	PINMUX(18, vo_656_clk, 1);	/* SDIO_CLK */
+	PINMUX(18, vo_656_7, 1);	/* SDIO_CMD */
+	PINMUX(18, vo_656_6, 2);	/* SDIO_WPROT */
+#endif
 
 #elif defined(CONFIG_BCM7358) || defined(CONFIG_BCM7552)
 
