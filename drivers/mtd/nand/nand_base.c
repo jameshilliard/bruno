@@ -422,6 +422,7 @@ static int nand_default_block_markbad(struct mtd_info *mtd, loff_t ofs)
 		ops.datbuf = NULL;
 		ops.oobbuf = buf;
 		ops.ooboffs = chip->badblockpos & ~0x01;
+		ops.mode = MTD_OPS_PLACE_OOB;
 		do {
 			ret = nand_do_write_oob(mtd, ofs, &ops);
 
@@ -1606,6 +1607,7 @@ static int nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 	ops.len = len;
 	ops.datbuf = buf;
 	ops.oobbuf = NULL;
+	ops.mode = 0;
 
 	ret = nand_do_read_ops(mtd, from, &ops);
 
@@ -2317,6 +2319,7 @@ static int panic_nand_write(struct mtd_info *mtd, loff_t to, size_t len,
 	ops.len = len;
 	ops.datbuf = (uint8_t *)buf;
 	ops.oobbuf = NULL;
+	ops.mode = 0;
 
 	ret = nand_do_write_ops(mtd, to, &ops);
 
@@ -2352,6 +2355,7 @@ static int nand_write(struct mtd_info *mtd, loff_t to, size_t len,
 	ops.len = len;
 	ops.datbuf = (uint8_t *)buf;
 	ops.oobbuf = NULL;
+	ops.mode = 0;
 
 	ret = nand_do_write_ops(mtd, to, &ops);
 
@@ -3139,8 +3143,8 @@ ident_done:
 	 * Bad block marker is stored in the last page of each block
 	 * on Samsung and Hynix MLC devices; stored in first two pages
 	 * of each block on Micron devices with 2KiB pages and on
-	 * SLC Samsung, Hynix, Toshiba and AMD/Spansion. All others scan
-	 * only the first page.
+	 * SLC Samsung, Hynix, Toshiba, AMD/Spansion, and Macronix.
+	 * All others scan only the first page.
 	 */
 	if ((chip->cellinfo & NAND_CI_CELLTYPE_MSK) &&
 			(*maf_id == NAND_MFR_SAMSUNG ||
@@ -3150,7 +3154,8 @@ ident_done:
 				(*maf_id == NAND_MFR_SAMSUNG ||
 				 *maf_id == NAND_MFR_HYNIX ||
 				 *maf_id == NAND_MFR_TOSHIBA ||
-				 *maf_id == NAND_MFR_AMD)) ||
+				 *maf_id == NAND_MFR_AMD ||
+				 *maf_id == NAND_MFR_MACRONIX)) ||
 			(mtd->writesize == 2048 &&
 			 *maf_id == NAND_MFR_MICRON))
 		chip->bbt_options |= NAND_BBT_SCAN2NDPAGE;
