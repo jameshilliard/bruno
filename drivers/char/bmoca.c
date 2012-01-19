@@ -38,6 +38,7 @@
 #define DRV_VERSION		0x00040000
 #define DRV_BUILD_NUMBER	0x20110831
 
+
 #if defined(CONFIG_BRCMSTB)
 #define MOCA6816		0
 #include <linux/bmoca.h>
@@ -244,6 +245,7 @@ struct bsc_regs {
 	u32			scl_param;
 };
 
+
 /* support for multiple MoCA devices */
 #define NUM_MINORS		8
 static struct moca_priv_data *minor_tbl[NUM_MINORS];
@@ -337,11 +339,18 @@ static void moca_mmp_init(struct moca_priv_data *priv, int is20)
 	}
 }
 
+
 #ifdef CONFIG_BRCM_MOCA_BUILTIN_FW
 #error Not supported in this version
 #else
 static const char *bmoca_fw_image;
 #endif
+
+#if MOCA6816
+
+#include "bmoca-6816.c"
+
+#else
 
 /*
  * LOW-LEVEL DEVICE OPERATIONS
@@ -406,6 +415,7 @@ static void moca_hw_init(struct moca_priv_data *priv, int action)
 			(1 << 1) | (1 << 7));
 		MOCA_RD(priv->base + priv->sw_reset_offset);
 	}
+
 
 	if (priv->hw_rev != HWREV_MOCA_20) {
 		/* clear junk out of GP0/GP1 */
@@ -602,6 +612,7 @@ static inline void moca_read_sg(struct moca_priv_data *priv,
 
 #define moca_3450_write moca_3450_write_i2c
 #define moca_3450_read moca_3450_read_i2c
+#endif
 
 static void moca_put_pages(struct moca_priv_data *priv, int pages)
 {
@@ -1028,6 +1039,7 @@ static int moca_h2m_sanity_check(struct moca_priv_data *priv,
 	}
 }
 
+
 /* Must have dev_mutex when calling this function */
 static int moca_sendmsg(struct moca_priv_data *priv, u32 cpuid)
 {
@@ -1270,7 +1282,18 @@ static irqreturn_t moca_interrupt(int irq, void *arg)
 {
 	struct moca_priv_data *priv = arg;
 
+#if MOCA6816
+	struct moca_platform_data *pd =
+		(struct moca_platform_data *)priv->pdev->dev.platform_data;
+
+	/*
+	 * If the driver is for an external chip then the work function needs
+	 * to run, otherwise a few interrupts can be handled here
+	 */
+	if (0 == pd->useSpi) {
+#else
 	if (1) {
+#endif
 		u32 mask = moca_irq_status(priv, FLUSH_DMA_ONLY);
 
 		/* need to handle DMA completions ASAP */
@@ -1353,6 +1376,7 @@ static u32 moca_3450_read_i2c(struct moca_priv_data *priv, u8 addr)
 	else
 		return 0xffffffff;
 }
+
 
 #define BCM3450_CHIP_ID		0x00
 #define BCM3450_CHIP_REV	0x04
@@ -1472,6 +1496,7 @@ static int moca_ioctl_readmem(struct moca_priv_data *priv,
 	return 0;
 }
 
+
 static int moca_ioctl_writemem(struct moca_priv_data *priv,
 	unsigned long xfer_uaddr)
 {
@@ -1554,6 +1579,11 @@ static int moca_ioctl_get_drv_info(struct moca_priv_data *priv,
 		info.gp1 = priv->running ?
 			MOCA_RD(priv->base + priv->gp1_offset) : 0;
 
+#ifdef DSL_MOCA
+		info.phy_freq = moca_get_phy_freq(priv);
+		info.cpu_freq = moca_get_cpu_freq(priv);
+#endif
+
 	memcpy(info.enet_name, pd->enet_name, MOCA_IFNAMSIZ);
 
 	info.enet_id = pd->enet_id;
@@ -1631,12 +1661,16 @@ static int moca_ioctl_check_for_data(struct moca_priv_data *priv,
 	return 0;
 }
 
+
 static long moca_file_ioctl(struct file *file, unsigned int cmd,
 	unsigned long arg)
 {
 	struct moca_priv_data *priv = file->private_data;
 	struct moca_start	  start;
 	long ret = -ENOTTY;
+#if MOCA6816
+	struct moca_platform_data *pd = priv->pdev->dev.platform_data;
+#endif
 
 	mutex_lock(&priv->dev_mutex);
 
@@ -1644,6 +1678,14 @@ static long moca_file_ioctl(struct file *file, unsigned int cmd,
 	case MOCA_IOCTL_START:
 		ret = 0;
 
+#if MOCA6816
+		/*
+		 * When MoCA is configured as WAN interface it will
+		 * get a new MAC address
+		 */
+		moca_read_mac_addr(priv, &pd->macaddr_hi,
+			&pd->macaddr_lo);
+#endif
 		if (copy_from_user(&start, (void __user *)arg, sizeof(start)))
 			ret = -EFAULT;
 
@@ -1954,8 +1996,28 @@ static int moca_probe(struct platform_device *pdev)
 
 	priv->hw_rev = pd->hw_rev;
 
-	if ((pd->chip_id == 0) ||
-		(pd->hw_rev == HWREV_MOCA_11_PLUS)) {
+#if MOCA6816
+	priv->data_mem_offset = 0;
+	priv->data_mem_size = (256 * 1024);
+	priv->cntl_mem_offset = 0x0004c000;
+	priv->cntl_mem_size = (80 * 1024);
+	priv->gp0_offset = 0x000a1418;
+	priv->gp1_offset = 0x000a141c;
+	priv->ringbell_offset = 0x000a1404;
+	priv->l2_status_offset = 0x000a2080;
+	priv->l2_clear_offset = 0x000a2088;
+	priv->l2_mask_set_offset = 0x000a2090;
+	priv->l2_mask_clear_offset = 0x000a2094;
+	priv->sw_reset_offset = 0x000a2040;
+	priv->led_ctrl_offset = 0x000a204c;
+	priv->m2m_src_offset = 0x000a2000;
+	priv->m2m_dst_offset = 0x000a2004;
+	priv->m2m_cmd_offset = 0x000a2008;
+	priv->m2m_status_offset = 0x000a200c;
+	priv->h2m_resp_bit[1] = 0x1;
+	priv->h2m_req_bit[1] = 0x2;
+#else
+	if (pd->hw_rev == HWREV_MOCA_11_PLUS) {
 		priv->data_mem_offset = 0;
 		priv->data_mem_size = (256 * 1024);
 		priv->cntl_mem_offset = 0x00040000;
@@ -2043,11 +2105,29 @@ static int moca_probe(struct platform_device *pdev)
 		priv->h2m_resp_bit[0] = 0x1;
 		priv->h2m_req_bit[0] = 0x2;
 	} else {
-		printk(KERN_ERR "%s: unsupported MoCA HWREV: %x\n",
-			__func__, pd->hw_rev);
-		err = -EINVAL;
-		goto bad;
+		priv->data_mem_offset = 0;
+		priv->data_mem_size = (256 * 1024);
+		priv->cntl_mem_offset = 0x00040000;
+		priv->cntl_mem_size = (128 * 1024);
+		priv->gp0_offset = 0x000a2050;
+		priv->gp1_offset = 0x000a2054;
+		priv->ringbell_offset = 0x000a2060;
+		priv->l2_status_offset = 0x000a2080;
+		priv->l2_clear_offset = 0x000a2088;
+		priv->l2_mask_set_offset = 0x000a2090;
+		priv->l2_mask_clear_offset = 0x000a2094;
+		priv->sw_reset_offset = 0x000a2040;
+		priv->led_ctrl_offset = 0x000a204c;
+		priv->led_ctrl_offset = 0x000a204c;
+		priv->m2m_src_offset = 0x000a2000;
+		priv->m2m_dst_offset = 0x000a2004;
+		priv->m2m_cmd_offset = 0x000a2008;
+		priv->m2m_status_offset = 0x000a200c;
+		priv->h2m_resp_bit[1] = 0x1;
+		priv->h2m_req_bit[1] = 0x2;
+		pd->chip_id = 0;
 	}
+#endif
 
 	init_waitqueue_head(&priv->host_msg_wq);
 	init_waitqueue_head(&priv->core_msg_wq);
@@ -2059,6 +2139,8 @@ static int moca_probe(struct platform_device *pdev)
 	mutex_init(&priv->dev_mutex);
 	mutex_init(&priv->copy_mutex);
 	mutex_init(&priv->moca_i2c_mutex);
+
+	sg_init_table(priv->fw_sg, MAX_FW_PAGES);
 
 	INIT_WORK(&priv->work, moca_work_handler);
 
@@ -2089,6 +2171,10 @@ static int moca_probe(struct platform_device *pdev)
 	priv->i2c_base = ioremap(pd->bcm3450_i2c_base, sizeof(struct bsc_regs));
 
 	/* leave core in reset until we get an ioctl */
+#if MOCA6816
+	moca_read_mac_addr(priv, &pd->macaddr_hi, &pd->macaddr_lo);
+	hw_specific_init(priv);
+#endif
 
 	moca_hw_reset(priv);
 
@@ -2215,6 +2301,10 @@ static struct platform_driver moca_plat_drv = {
 static int moca_init(void)
 {
 	int ret;
+#ifdef DSL_MOCA
+	unsigned char portInfo6829 = 0;
+	int retVal;
+#endif
 	memset(minor_tbl, 0, sizeof(minor_tbl));
 	ret = register_chrdev(MOCA_MAJOR, MOCA_CLASS, &moca_fops);
 	if (ret < 0) {
@@ -2228,7 +2318,20 @@ static int moca_init(void)
 		ret = PTR_ERR(moca_class);
 		goto bad2;
 	}
+#if MOCA6816
+	platform_device_register(&moca_plat_dev);
+#endif
 
+#ifdef DSL_MOCA
+	retVal = BpGet6829PortInfo(&portInfo6829);
+	if (retVal != BP_SUCCESS) {
+		printk(KERN_ERR "bmoca: can't read board params\n");
+		portInfo6829 = 0;
+		goto bad3;
+	}
+	if (portInfo6829)
+		platform_device_register(&moca1_plat_dev);
+#endif
 	ret = platform_driver_register(&moca_plat_drv);
 	if (ret < 0) {
 		printk(KERN_ERR "bmoca: can't register platform_driver\n");
@@ -2238,6 +2341,12 @@ static int moca_init(void)
 	return 0;
 
 bad3:
+#if MOCA6816
+	platform_device_unregister(&moca_plat_dev);
+
+	if (portInfo6829)
+		platform_device_unregister(&moca1_plat_dev);
+#endif
 	class_destroy(moca_class);
 bad2:
 	unregister_chrdev(MOCA_MAJOR, MOCA_CLASS);
@@ -2247,10 +2356,26 @@ bad:
 
 static void moca_exit(void)
 {
+#ifdef DSL_MOCA
+	unsigned char portInfo6829 = 0;
+	int retVal;
+#endif
 	class_destroy(moca_class);
 	unregister_chrdev(MOCA_MAJOR, MOCA_CLASS);
 	platform_driver_unregister(&moca_plat_drv);
+#ifdef DSL_MOCA
+	platform_device_unregister(&moca_plat_dev);
+#endif
 
+#ifdef DSL_MOCA
+	retVal = BpGet6829PortInfo(&portInfo6829);
+	if (retVal != BP_SUCCESS) {
+		printk(KERN_ERR "bmoca: can't read board params\n");
+		portInfo6829 = 0;
+	}
+	if (portInfo6829)
+		platform_device_unregister(&moca1_plat_dev);
+#endif
 }
 
 module_init(moca_init);
