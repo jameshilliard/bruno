@@ -23,6 +23,7 @@
 #include <linux/delay.h>
 #include <linux/serial_8250.h>
 #include <linux/platform_device.h>
+#include <linux/ahci_platform.h>
 #include <linux/bootmem.h>
 #include <linux/spinlock.h>
 #include <linux/mm.h>
@@ -34,8 +35,10 @@
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/time.h>
+#include <linux/version.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/flash.h>
+#include <linux/mmc/sdhci-pltfm.h>
 
 #include <asm/serial.h>
 #include <asm/reboot.h>
@@ -63,6 +66,77 @@
  * Platform device setup
  ***********************************************************************/
 
+#ifdef CONFIG_BRCM_HAS_SATA3
+
+#define SATA_MEM_START		BPHYSADDR(BCHP_SATA_AHCI_GHC_REG_START)
+#define SATA_MEM_SIZE		0x00010000
+
+#ifdef CONFIG_CPU_BIG_ENDIAN
+#define DATA_ENDIAN		2	/* PCI->DDR inbound accesses */
+#define MMIO_ENDIAN 		2	/* MIPS->PCI outbound accesses */
+#else
+#define DATA_ENDIAN		0
+#define MMIO_ENDIAN		0
+#endif /* CONFIG_CPU_BIG_ENDIAN */
+
+static struct resource brcm_ahci_resource[] = {
+	[0] = {
+		.start	= SATA_MEM_START,
+		.end	= SATA_MEM_START + SATA_MEM_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= BRCM_IRQ_SATA,
+		.end 	= BRCM_IRQ_SATA,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static u64 brcm_ahci_dmamask = DMA_BIT_MASK(32);
+
+static int brcm_ahci_init(struct device *dev, void __iomem *addr)
+{
+	brcm_pm_sata3(1);
+	return 0;
+}
+
+static void brcm_ahci_exit(struct device *dev)
+{
+	brcm_pm_sata3(0);
+}
+
+static int brcm_ahci_suspend(struct device *dev)
+{
+	brcm_pm_sata3(0);
+	return 0;
+}
+
+static int brcm_ahci_resume(struct device *dev)
+{
+	brcm_pm_sata3(1);
+	return 0;
+}
+
+static struct ahci_platform_data brcm_ahci_pdata = {
+	.init = &brcm_ahci_init,
+	.exit = &brcm_ahci_exit,
+	.suspend = &brcm_ahci_suspend,
+	.resume = &brcm_ahci_resume,
+};
+
+static struct platform_device brcm_ahci_pdev = {
+	.name		= "ahci",
+	.id		= 0,
+	.resource	= brcm_ahci_resource,
+	.num_resources	= ARRAY_SIZE(brcm_ahci_resource),
+	.dev		= {
+		.dma_mask		= &brcm_ahci_dmamask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+		.platform_data		= &brcm_ahci_pdata,
+	},
+};
+#endif /* CONFIG_BRCM_HAS_SATA3 */
+
 #define BRCM_16550_PLAT_DEVICE(uart_addr, uart_irq) \
 	{ \
 		.mapbase = BPHYSADDR(uart_addr), \
@@ -72,11 +146,6 @@
 		.flags = UPF_IOREMAP | UPF_SKIP_TEST | UPF_FIXED_TYPE, \
 		.type = PORT_16550A, \
 	},
-
-#ifdef CONFIG_BRCM_HAS_PCU_UARTS
-#define BCHP_UARTA_REG_START	BCHP_TVM_UART1_RBR
-#define BCHP_UARTB_REG_START	BCHP_PCU_UART2_RBR
-#endif
 
 static struct plat_serial8250_port brcm_16550_ports[] = {
 #ifdef CONFIG_BRCM_UARTA_IS_16550
@@ -178,31 +247,7 @@ static struct platform_device bcmemac_1_plat_dev = {
 };
 #endif /* defined(CONFIG_BRCM_HAS_EMAC_1) */
 
-#if defined(CONFIG_BRCM_HAS_SDIO_V0)
-
-static struct resource sdio_resources[] = {
-	[0] = {
-		.start		= BPHYSADDR(BCHP_SDIO_REG_START),
-		.end		= BPHYSADDR(BCHP_SDIO_REG_END) + 3,
-		.flags		= IORESOURCE_MEM,
-	},
-	[1] = {
-		.start		= BRCM_IRQ_HIF,
-		.end		= BRCM_IRQ_HIF,
-		.flags		= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device sdio_plat_dev = {
-	.name			= "sdhci-brcm",
-	.id			= 0,
-	.num_resources		= ARRAY_SIZE(sdio_resources),
-	.resource		= sdio_resources,
-};
-
-#endif /* defined(CONFIG_BRCM_HAS_SDIO_V0) */
-
-#if defined(CONFIG_BRCM_HAS_SDIO_V1)
+#if defined(CONFIG_BRCM_SDIO)
 
 static void __init brcm_add_sdio_host(int id, uintptr_t cfg_base,
 	uintptr_t host_base, int irq)
@@ -227,10 +272,12 @@ static void __init brcm_add_sdio_host(int id, uintptr_t cfg_base,
 
 	pdev = platform_device_alloc("sdhci", id);
 	platform_device_add_resources(pdev, res, 2);
+	platform_device_add_data(pdev, &sdhci_brcm_pdata,
+		sizeof(sdhci_brcm_pdata));
 	platform_device_add(pdev);
 }
 
-#endif /* defined(CONFIG_BRCM_HAS_SDIO_V1) */
+#endif /* defined(CONFIG_BRCM_SDIO) */
 
 #define CAP_ACTIVE		0x01
 #define CAP_LAST		0x02
@@ -311,8 +358,7 @@ static void __init brcm_add_usb_hosts(void)
 				break;
 			}
 #if defined(CONFIG_BCM7425B0) || defined(CONFIG_BCM7231B0) || \
-	defined(CONFIG_BCM7344B0) || defined(CONFIG_BCM7346B0) || \
-	defined(CONFIG_BCM7640B0) || defined(CONFIG_BCM35126B0)
+	defined(CONFIG_BCM7344B0) || defined(CONFIG_BCM7346B0)
 		/* bug: incorrect CAP_LAST bit on some chips */
 		} while (capp != (caplist[i] + 0x20));
 #else
@@ -558,12 +604,7 @@ static int __init platform_devices_setup(void)
 	}
 #endif /* defined(CONFIG_BRCM_HAS_GENET) */
 
-#if defined(CONFIG_BRCM_HAS_SDIO_V0)
-	bchip_sdio_init(0, 0);
-	platform_device_register(&sdio_plat_dev);
-#endif
-
-#if defined(CONFIG_BRCM_HAS_SDIO_V1)
+#if defined(CONFIG_BRCM_SDIO)
 	brcm_add_sdio_host(0, BCHP_SDIO_0_CFG_REG_START,
 		BCHP_SDIO_0_HOST_REG_START, BRCM_IRQ_SDIO0);
 
@@ -572,8 +613,17 @@ static int __init platform_devices_setup(void)
 		BCHP_SDIO_1_HOST_REG_START, BRCM_IRQ_SDIO1);
 #endif /* defined(BCHP_SDIO_1_CFG_REG_START) */
 
-#endif /* defined(CONFIG_BRCM_HAS_SDIO_V1) */
+#endif /* defined(CONFIG_BRCM_SDIO) */
 
+	/* AHCI */
+#if defined(CONFIG_BRCM_HAS_SATA3)
+	if (brcm_sata_enabled) {
+		BDEV_WR(BCHP_SATA_TOP_CTRL_BUS_CTRL, (DATA_ENDIAN << 4) |
+				(DATA_ENDIAN << 2) | (MMIO_ENDIAN << 0));
+
+		platform_device_register(&brcm_ahci_pdev);
+	}
+#endif
 	return 0;
 }
 
@@ -815,7 +865,11 @@ static int __init brcmstb_mtd_setup(void)
 		 */
 		mtd = do_map_probe("map_absent", &brcm_dummy_map);
 		if (mtd)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0)
+			mtd_device_register(mtd, NULL, 0);
+#else
 			add_mtd_device(mtd);
+#endif
 
 		printk(KERN_WARNING
 			"warning: unable to build a flash partition map, "

@@ -24,6 +24,8 @@
 #include <linux/bitops.h>
 #include <linux/module.h>
 #include <linux/version.h>
+#include <linux/compiler.h>
+#include <linux/mmc/sdhci-pltfm.h>
 
 #include <asm/mipsregs.h>
 #include <asm/barrier.h>
@@ -36,6 +38,8 @@
 #include <asm/cpu-features.h>
 #include <asm/brcmstb/brcmstb.h>
 #include <dma-coherence.h>
+
+#include "../drivers/mmc/host/sdhci.h"
 
 /* chip features */
 int brcm_sata_enabled;
@@ -106,9 +110,7 @@ void __init bchip_check_compat(void)
 	u32 chip_id = BRCM_CHIP_ID(), chip_rev = BRCM_CHIP_REV();
 	u32 kernel_chip_id = 0, kernel_chip_rev = 0;
 
-#if defined(CONFIG_BCM35230)
-	MAIN_CHIP_ID(35230, a0);
-#elif defined(CONFIG_BCM7125)
+#if defined(CONFIG_BCM7125)
 	ALT_CHIP_ID(7019, c0);
 	ALT_CHIP_ID(7025, c0);
 	ALT_CHIP_ID(7116, c0);
@@ -121,9 +123,6 @@ void __init bchip_check_compat(void)
 #elif defined(CONFIG_BCM7340)
 	ALT_CHIP_ID(7350, b0);
 	MAIN_CHIP_ID(7340, b0);
-#elif defined(CONFIG_BCM7342)
-	ALT_CHIP_ID(7352, b0);
-	MAIN_CHIP_ID(7342, b0);
 #elif defined(CONFIG_BCM7344)
 	MAIN_CHIP_ID(7344, a0);
 #elif defined(CONFIG_BCM7346)
@@ -151,10 +150,6 @@ void __init bchip_check_compat(void)
 	MAIN_CHIP_ID(7468, b0);
 #elif defined(CONFIG_BCM7550)
 	MAIN_CHIP_ID(7550, a0);
-#elif defined(CONFIG_BCM7631)
-	MAIN_CHIP_ID(7631, b0);
-#elif defined(CONFIG_BCM7640)
-	MAIN_CHIP_ID(7640, a0);
 #endif
 	if (!kernel_chip_id)
 		return;
@@ -244,17 +239,6 @@ void bchip_mips_setup(void)
 		: : : "$8", "$9");
 	}
 
-#elif defined(CONFIG_MTI_R5K)
-
-	/* Flush and enable RAC */
-	BDEV_WR(BCHP_RAC_COMMAND, 0x01);
-	while (BDEV_RD(BCHP_RAC_VALID_FWD_STATUS) & 0xffff)
-		;
-	BDEV_WR_RB(BCHP_RAC_COMMAND, 0x00);
-
-	BDEV_WR_RB(BCHP_RAC_CACHEABLE_SPACE, 0x0fff0000);
-	BDEV_WR_RB(BCHP_RAC_MODE, 0xd3);
-
 #endif
 }
 
@@ -324,6 +308,11 @@ static void bchip_usb_init_one(int id, uintptr_t base)
 	BDEV_SET(USB_REG(base, EBRIDGE),
 		0x08 << BCHP_USB_CTRL_EBRIDGE_EBR_SCB_SIZE_SHIFT);
 
+#if defined(CONFIG_BRCM_HAS_1GB_MEMC1)
+	/* enable access to SCB1 */
+	BDEV_SET(USB_REG(base, SETUP), BIT(14));
+#endif
+
 #if defined(BCHP_USB_CTRL_GENERIC_CTL_1_PLL_SUSPEND_EN_MASK)
 	BDEV_SET(USB_REG(base, GENERIC_CTL_1),
 		BCHP_USB_CTRL_GENERIC_CTL_1_PLL_SUSPEND_EN_MASK);
@@ -367,34 +356,47 @@ void bchip_moca_init(void)
 #elif defined(CONFIG_BCM7340)
 	BDEV_WR_F_RB(CLKGEN_MISC_CLOCK_SELECTS, CLOCK_SEL_ENET_CG_MOCA, 1);
 	BDEV_WR_F_RB(CLKGEN_MISC_CLOCK_SELECTS, CLOCK_SEL_GMII_CG_MOCA, 0);
-#elif defined(CONFIG_BCM7342) || defined(CONFIG_BCM7408) || \
-	defined(CONFIG_BCM7420)
+#elif defined(CONFIG_BCM7408) || defined(CONFIG_BCM7420)
 	BDEV_WR_F_RB(CLK_MISC, MOCA_ENET_GMII_TX_CLK_SEL, 0);
 #endif
 }
 #endif
 
-#if defined(CONFIG_BRCM_HAS_SDIO)
+#if defined(CONFIG_BRCM_SDIO)
+
+/* Use custom I/O accessors to avoid readl/readw byte swapping in BE mode */
+
+static u32 sdhci_brcm_readl(struct sdhci_host *host, int reg)
+{
+	return __raw_readl(host->ioaddr + reg);
+}
+
+static u16 sdhci_brcm_readw(struct sdhci_host *host, int reg)
+{
+	return __raw_readw(host->ioaddr + reg);
+}
+
+static void sdhci_brcm_writel(struct sdhci_host *host, u32 val, int reg)
+{
+	__raw_writel(val, host->ioaddr + reg);
+}
+
+static void sdhci_brcm_writew(struct sdhci_host *host, u16 val, int reg)
+{
+	__raw_writew(val, host->ioaddr + reg);
+}
+
+static struct sdhci_ops __maybe_unused sdhci_be_ops = {
+	.read_l			= sdhci_brcm_readl,
+	.read_w			= sdhci_brcm_readw,
+	.write_l		= sdhci_brcm_writel,
+	.write_w		= sdhci_brcm_writew,
+};
+
+struct sdhci_pltfm_data sdhci_brcm_pdata = { };
+
 int __init bchip_sdio_init(int id, uintptr_t cfg_base)
 {
-#ifdef BCHP_HIF_TOP_CTRL_SDIO_CTRL
-	/* HIF_TOP_CTRL_SDIO_CTRL only exists for V0 controllers */
-#ifdef CONFIG_CPU_LITTLE_ENDIAN
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, WORD_ABO, 0);
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, FRAME_NBO, 0);
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, FRAME_NHW, 1);
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, BUFFER_ABO, 1);
-#else
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, WORD_ABO, 1);
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, FRAME_NBO, 1);
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, FRAME_NHW, 1);
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, BUFFER_ABO, 0);
-#endif
-	BDEV_WR_F_RB(HIF_TOP_CTRL_SDIO_CTRL, SCB_SEQ_EN, 0);
-#endif /* BCHP_HIF_TOP_CTRL_SDIO_CTRL */
-
-#ifdef CONFIG_BRCM_HAS_SDIO_V1
-
 #define SDIO_REG(x, y)		(x + BCHP_SDIO_0_CFG_##y - \
 				 BCHP_SDIO_0_CFG_REG_START)
 
@@ -417,10 +419,19 @@ int __init bchip_sdio_init(int id, uintptr_t cfg_base)
 #else
 	/* WORD_ABO | FRAME_NBO | FRAME_NHW */
 	BDEV_SET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL1), 0xe000);
-	/* address + data swap on byte/halfword accesses */
-	BDEV_SET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL2), 0x005f);
+	/* address swap only */
+	BDEV_SET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL2), 0x0050);
+	sdhci_brcm_pdata.ops = &sdhci_be_ops;
 #endif
-#endif /* CONFIG_BRCM_HAS_SDIO_V1 */
+
+#if defined(CONFIG_BCM7231B0) || defined(CONFIG_BCM7346B0)
+	BDEV_SET(SDIO_REG(cfg_base, CAP_REG1), BIT(31));	/* Override=1 */
+#endif
+
+#if defined(CONFIG_BCM7344B0)
+	BDEV_UNSET(SDIO_REG(cfg_base, CAP_REG0), BIT(19));	/* Highspd=0 */
+	BDEV_SET(SDIO_REG(cfg_base, CAP_REG1), BIT(31));	/* Override=1 */
+#endif
 
 #if defined(CONFIG_BCM7425A0) || defined(CONFIG_BCM7231A0)
 
@@ -449,7 +460,7 @@ int __init bchip_sdio_init(int id, uintptr_t cfg_base)
 
 	return 0;
 }
-#endif
+#endif /* defined(CONFIG_BRCM_SDIO) */
 
 void __init bchip_set_features(void)
 {
@@ -533,11 +544,10 @@ void __init bchip_set_features(void)
 #endif
 
 #if defined(CONFIG_BCM7125) || defined(CONFIG_BCM7340) || \
-	defined(CONFIG_BCM7342) || defined(CONFIG_BCM7420)
+	defined(CONFIG_BCM7420)
 
 	switch (BRCM_CHIP_ID()) {
 	case 0x7340:
-	case 0x7342:
 		if (BDEV_RD_F(SUN_TOP_CTRL_OTP_OPTION_STATUS_0,
 				otp_option_product_id) != 1)
 			break;
