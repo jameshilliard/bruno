@@ -1198,7 +1198,6 @@ static void moca_work_handler(struct work_struct *work)
 	mutex_lock(&priv->dev_mutex);
 
 	if (!priv->running) {
-		moca_enable_irq(priv);
 		stopped = 1;
 	} else {
 		/* fatal events */
