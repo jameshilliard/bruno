@@ -132,33 +132,7 @@ char irq_tab_brcmstb_docsis[NUM_SLOTS][4] __devinitdata = {
 void board_pinmux_setup(void)
 {
 #if !defined(CONFIG_BRCM_IKOS)
-#if   defined(CONFIG_BCM35230)
-
-#if defined(CONFIG_BCMGENET_0_GPHY)
-	PINMUX(6, i2ssosck_outd, 2);
-	PINMUX(6, i2ssd_outd, 2);
-	PINMUX(6, i2sws_outd, 2);
-	PINMUX(6, i2ssck_outd, 2);
-	PINMUX(6, i2ssosck_outc, 2);
-	PINMUX(6, i2ssd_outc, 2);
-	PINMUX(6, i2sws_outc, 2);
-	PINMUX(6, i2ssck_outc, 2);
-	PINMUX(7, i2ssd_in, 5);
-	PINMUX(7, i2sws_in, 5);
-	PINMUX(7, i2ssck_in, 5);
-	PINMUX(8, gpio_4, 4);
-	PINMUX(9, gpio_74, 3);
-	PINMUX(10, gpio_79, 3);
-	PINMUX(10, gpio_78, 3);
-	PINMUX(10, gpio_77, 3);
-	PINMUX(10, gpio_76, 3);
-	PINMUX(10, gpio_75, 3);
-	PINMUX(11, dint, 2);
-
-	brcm_ext_mii_mode = BRCM_PHY_TYPE_EXT_MII;
-#endif
-
-#elif defined(CONFIG_BCM7125)
+#if defined(CONFIG_BCM7125)
 
 	PINMUX(8, uart_1_rxd, 0);	/* UARTB RX */
 	PINMUX(9, uart_1_txd, 0);	/* UARTB TX */
@@ -290,40 +264,6 @@ void board_pinmux_setup(void)
 	brcm_moca_i2c_base = BPHYSADDR(BCHP_BSCA_REG_START);
 
 #elif defined(CONFIG_BCM7344)
-
-	PINMUX(15, gpio_79, 1);		/* MoCA link */
-	PINMUX(15, gpio_80, 1);		/* MoCA activity */
-
-	PINMUX(17, uart_rxdb, 0);	/* UARTB RX */
-
-#ifdef CONFIG_BCM7344A0
-	PINMUX(18, uart_txdb, 0);	/* UARTB TX */
-#else
-	PINMUX(17, uart_txdb, 0);	/* UARTB TX */
-
-	PINMUX(0, gpio_68, 3);		/* SDIO */
-	PINMUX(0, gpio_69, 3);
-	PINMUX(0, gpio_70, 3);
-	PINMUX(0, gpio_71, 2);
-	PINMUX(0, gpio_72, 2);
-	PINMUX(0, gpio_73, 2);
-	PINMUX(0, gpio_74, 2);
-	PINMUX(0, gpio_75, 2);
-	PINMUX(1, gpio_76, 2);
-	PINMUX(1, gpio_77, 2);
-
-	/* enable pullup on SDIO lines */
-	PADCTRL(0, gpio_68_pad_ctrl, 2);
-	PADCTRL(0, gpio_69_pad_ctrl, 2);
-	PADCTRL(0, gpio_70_pad_ctrl, 2);
-	PADCTRL(0, gpio_71_pad_ctrl, 2);
-	PADCTRL(0, gpio_72_pad_ctrl, 2);
-	PADCTRL(0, gpio_73_pad_ctrl, 2);
-	PADCTRL(0, gpio_74_pad_ctrl, 2);
-	PADCTRL(0, gpio_75_pad_ctrl, 2);
-	PADCTRL(0, gpio_76_pad_ctrl, 2);
-	PADCTRL(0, gpio_77_pad_ctrl, 2);
-#endif
 
 	PINMUX(15, gpio_79, 1);		/* MoCA link */
 	PINMUX(15, gpio_80, 1);		/* MoCA activity */
@@ -646,6 +586,75 @@ void board_pinmux_setup(void)
 	brcm_moca_i2c_base = BPHYSADDR(BCHP_BSCA_REG_START);
 #endif
 
+#elif defined(CONFIG_BCM7429)
+
+	PINMUX(11, gpio_094, 1);	/* UARTB TX */
+	PINMUX(11, gpio_095, 1);	/* UARTB RX */
+	PINMUX(12, gpio_096, 1);	/* UARTC TX */
+	PINMUX(12, gpio_097, 1);	/* UARTC RX */
+
+	AON_PINMUX(1, aon_gpio_11, 7);	/* MoCA LEDs */
+	AON_PINMUX(2, aon_gpio_14, 5);
+
+	PINMUX(18, sgpio_00, 1);	/* MoCA I2C */
+	PINMUX(18, sgpio_01, 1);
+	brcm_moca_i2c_base = BPHYSADDR(BCHP_BSCD_REG_START);
+
+	/* Bootloader indicates the availability of SDIO_0 in SCRATCH reg */
+	if ((BDEV_RD(BCHP_SDIO_0_CFG_SCRATCH) & 0x01) == 0) {
+		/*
+		 * 7241 uses GPIO_092 for UART_TX0 instead of SDIO0_VCTL so
+		 * leave it alone. We don't need SDIO0_VCTL because the board
+		 * is 3.3V only and doesn't use it.
+		 */
+		if (BRCM_PROD_ID() != 0x7241)
+			PINMUX(11, gpio_092, 5);
+		PINMUX(14, gpio_122, 1);
+		PINMUX(14, gpio_123, 1);
+		PINMUX(14, gpio_124, 1);
+		PINMUX(15, gpio_125, 1);
+		PINMUX(15, gpio_126, 1);
+		PINMUX(15, gpio_127, 1);
+		PINMUX(15, gpio_128, 1);
+		PINMUX(15, gpio_129, 1);
+		PINMUX(15, gpio_131, 1);
+		/*
+		 * 7428a0 board uses GPIO_93 for SDIO0_PRES
+		 * 7429a0 board uses GPIO_130 for SDIO0_PRES
+		 */
+		if (BRCM_PROD_ID() == 0x7428) {
+			PINMUX(11, gpio_093, 5);
+			BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_6,
+						 gpio_093_pad_ctrl, 0);
+		} else
+			PINMUX(15, gpio_130, 1);
+
+		/* enable internal pullups */
+		if (BRCM_PROD_ID() != 0x7241)
+			BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_6,
+						 gpio_092_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_122_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_123_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_124_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_125_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_126_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_127_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_128_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_8,
+			gpio_129_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_9,
+			gpio_130_pad_ctrl, 2);
+		BDEV_WR_F_RB(SUN_TOP_CTRL_PIN_MUX_PAD_CTRL_9,
+			gpio_131_pad_ctrl, 2);
+	}
+
 #elif defined(CONFIG_BCM7468)
 
 	/* NOTE: R1022 and R1023 must be installed to use UARTB */
@@ -683,34 +692,6 @@ void board_pinmux_setup(void)
 	PINMUX(13, gpio_85, 1);		/* UARTB RX */
 	PINMUX(13, gpio_86, 1);		/* UARTC TX */
 	PINMUX(13, gpio_87, 1);		/* UARTC RX */
-
-#elif defined(CONFIG_BCM7640A0)
-	PINMUX(8, gpio_03, 1);		/* UARTB TX */
-	PINMUX(7, gpio_02, 1);		/* UARTB RX */
-
-	PINMUX(12, gpio_36, 1);		/* SDIO */
-	PINMUX(12, gpio_37, 1);
-	PINMUX(12, gpio_38, 1);
-	PINMUX(12, gpio_39, 1);
-	PINMUX(12, gpio_40, 1);
-	PINMUX(12, gpio_41, 1);
-	PINMUX(12, gpio_42, 1);
-	PINMUX(13, gpio_43, 1);
-	PINMUX(13, gpio_44, 1);
-
-#elif defined(CONFIG_BCM7640B0)
-	PINMUX(6, gpio_03, 1);		/* UARTB TX */
-	PINMUX(6, gpio_02, 1);		/* UARTB RX */
-
-	PINMUX(10, gpio_36, 1);		/* SDIO */
-	PINMUX(10, gpio_37, 1);
-	PINMUX(11, gpio_38, 1);
-	PINMUX(11, gpio_39, 1);
-	PINMUX(11, gpio_40, 1);
-	PINMUX(11, gpio_41, 1);
-	PINMUX(11, gpio_42, 1);
-	PINMUX(11, gpio_43, 1);
-	PINMUX(11, gpio_44, 1);
 
 #endif /* chip type */
 #endif /* !defined(CONFIG_BRCM_IKOS) */
