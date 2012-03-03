@@ -288,7 +288,12 @@ static void __init get_fs_names(char *page)
 
 static int __init do_mount_root(char *name, char *fs, int flags, void *data)
 {
-	int err = sys_mount(name, "/root", fs, flags, data);
+	int err;
+
+	/* initramfs should have created this; survive if it didn't. */
+	sys_mkdir((const char __user __force *) "/root", 0700);
+
+	err = sys_mount(name, "/root", fs, flags, data);
 	if (err)
 		return err;
 

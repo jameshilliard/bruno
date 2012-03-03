@@ -660,12 +660,22 @@ ssize_t brcm_pm_store_halt_mode(struct device *dev,
 
 /* Boot time functions */
 
+static void __init brcm_pm_suntop_disable(void)
+{
+	printk("Resetting SUN_TOP device.\n");
+	BDEV_WR_RB(BCHP_SUN_TOP_CTRL_SW_INIT_0_SET, 0x100);
+	BDEV_WR_RB(BCHP_SUN_TOP_CTRL_SW_INIT_0_CLEAR, 0x100);
+}
+
+
 static int __init brcm_pm_init(void)
 {
 	if (!brcm_pm_enabled)
 		return 0;
 	if (!brcm_moca_enabled)
 		brcm_pm_moca_disable(0);
+	brcm_pm_suntop_disable();
+
 	/* chip specific initialization */
 	brcm_pm_initialize();
 	return 0;
