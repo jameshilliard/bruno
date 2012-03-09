@@ -41,6 +41,7 @@ bootmem_data_t bootmem_node_data[MAX_NUMNODES] __initdata;
 static struct list_head bdata_list __initdata = LIST_HEAD_INIT(bdata_list);
 
 static int bootmem_debug;
+static int bootmem_stopped;
 
 static int __init bootmem_debug_setup(char *buf)
 {
@@ -238,6 +239,7 @@ static unsigned long __init free_all_bootmem_core(bootmem_data_t *bdata)
 
 	bdebug("nid=%td start=%lx end=%lx aligned=%d\n",
 		bdata - bootmem_node_data, start, end, aligned);
+	bootmem_stopped = 1;
 
 	while (start < end) {
 		unsigned long *map, idx, vec;
@@ -348,6 +350,7 @@ static int __init __reserve(bootmem_data_t *bdata, unsigned long sidx,
 	unsigned long idx;
 	int exclusive = flags & BOOTMEM_EXCLUSIVE;
 
+	BUG_ON(bootmem_stopped);
 	bdebug("nid=%td start=%lx end=%lx flags=%x\n",
 		bdata - bootmem_node_data,
 		sidx + bdata->node_min_pfn,
