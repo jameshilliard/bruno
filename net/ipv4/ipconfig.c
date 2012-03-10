@@ -87,8 +87,8 @@
 #endif
 
 /* Define the friendly delay before and after opening net devices */
-#define CONF_PRE_OPEN		500	/* Before opening: 1/2 second */
-#define CONF_POST_OPEN		1	/* After opening: 1 second */
+#define CONF_PRE_OPEN		0	/* Before opening (msec) */
+#define CONF_POST_OPEN		0	/* After opening (msec) */
 
 /* Define the timeout for waiting for a DHCP/BOOTP/RARP reply */
 #define CONF_OPEN_RETRIES 	2	/* (Re)open devices twice */
@@ -1325,7 +1325,7 @@ static int __init wait_for_devices(void)
 	int i;
 
 	msleep(CONF_PRE_OPEN);
-	for (i = 0; i < DEVICE_WAIT_MAX; i++) {
+	for (i = 0; i < DEVICE_WAIT_MAX*100; i++) {
 		struct net_device *dev;
 		int found = 0;
 
@@ -1339,7 +1339,7 @@ static int __init wait_for_devices(void)
 		rtnl_unlock();
 		if (found)
 			return 0;
-		ssleep(1);
+		msleep(10);
 	}
 	return -ENODEV;
 }
@@ -1378,7 +1378,7 @@ static int __init ip_auto_config(void)
 		return err;
 
 	/* Give drivers a chance to settle */
-	ssleep(CONF_POST_OPEN);
+	msleep(CONF_POST_OPEN);
 
 	/*
 	 * If the config information is insufficient (e.g., our IP address or
