@@ -58,6 +58,10 @@ unsigned long __initdata cfe_seal;
 unsigned long __initdata cfe_entry;
 unsigned long __initdata cfe_handle;
 
+#ifdef CONFIG_CMDLINE_BOOL
+static char __initdata builtin_cmdline[COMMAND_LINE_SIZE] = CONFIG_CMDLINE;
+#endif
+
 /***********************************************************************
  * CFE bootloader queries
  ***********************************************************************/
@@ -383,6 +387,16 @@ void __init prom_init(void)
 #endif
 	brcm_setup_early_printk();
 
+#ifdef CONFIG_CMDLINE_BOOL
+#ifdef CONFIG_CMDLINE_OVERRIDE
+	strlcpy(arcs_cmdline, builtin_cmdline, COMMAND_LINE_SIZE);
+#else
+	if (builtin_cmdline[0]) {
+		strlcat(arcs_cmdline, " ", COMMAND_LINE_SIZE);
+		strlcat(arcs_cmdline, builtin_cmdline, COMMAND_LINE_SIZE);
+	}
+#endif
+#endif
 	/* provide "ubiroot" alias to reduce typing */
 	if (strstr(arcs_cmdline, "ubiroot"))
 		strcat(arcs_cmdline, " ubi.mtd=rootfs rootfstype=ubifs "
