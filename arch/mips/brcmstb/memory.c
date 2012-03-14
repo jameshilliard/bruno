@@ -97,6 +97,7 @@ static int __init bmem_setup(char *str)
 	unsigned long addr = 0, size;
 	unsigned long lower_mem_bytes;
 	char *orig_str = str;
+	struct bmem_region *i;
 
 	lower_mem_bytes = (brcm_dram0_size_mb > BRCM_MAX_LOWER_MB) ?
 		(BRCM_MAX_LOWER_MB << 20) : (brcm_dram0_size_mb << 20);
@@ -141,6 +142,15 @@ static int __init bmem_setup(char *str)
 		printk(KERN_WARNING "bmem: too many regions, "
 			"ignoring extras\n");
 		return 0;
+	}
+
+	for (i = bmem_regions; i < bmem_regions + n_bmem_regions; i++) {
+		if (addr < i->addr + i->size && addr + size > i->addr) {
+			printk(KERN_WARNING "bmem: %ld MB @ %ld MB "
+				"overlaps with existing region, "
+				"ignoring\n", size/1024/1024, addr/1024/1024);
+			return 0;
+		}
 	}
 
 	bmem_regions[n_bmem_regions].addr = addr;
