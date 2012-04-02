@@ -1170,7 +1170,7 @@ void __init plat_mem_setup(void)
 	_machine_halt = brcm_machine_halt;
 	pm_power_off = brcm_machine_halt;
 
-	panic_timeout = 180;
+	panic_timeout = 10;
 
 #ifdef CONFIG_PCI
 	pcibios_plat_setup = brcmstb_pcibios_setup;
