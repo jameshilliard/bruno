@@ -860,8 +860,8 @@ static int __initdata nandcs[NUM_CS];
 #define BRUNO_KERNEL1_NAME     "kernel1"
 #define BRUNO_ROOTFS0_NAME     "rootfs0"
 #define BRUNO_ROOTFS1_NAME     "rootfs1"
-#define BRUNO_USER_NAME        "user"
-#define BRUNO_CONFIG_NAME      "config"
+#define BRUNO_USER_NAME        "user+ubi"
+#define BRUNO_CONFIG_NAME      "config+ubi"
 #define BRUNO_CHECKSUM_NAME    "checksum"
 
 #define BRUNO_CFE_SIZE         0x00200000UL
