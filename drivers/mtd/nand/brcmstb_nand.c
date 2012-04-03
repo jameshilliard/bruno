@@ -451,7 +451,7 @@ static int brcmstb_nand_waitfunc(struct mtd_info *mtd, struct nand_chip *this)
 
 	DBG("%s: native cmd %d\n", __func__, ctrl.cmd_pending);
 	if (ctrl.cmd_pending &&
-			wait_for_completion_timeout(&ctrl.done, HZ / 10) <= 0) {
+			wait_for_completion_timeout(&ctrl.done, HZ / 2) <= 0) {
 		dev_err(&host->pdev->dev,
 			"timeout waiting for command %u (%ld)\n",
 			host->last_cmd, BDEV_RD(BCHP_NAND_CMD_START) >> 24);
