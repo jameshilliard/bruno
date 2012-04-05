@@ -809,11 +809,18 @@ static void bcmgenet_set_multicast_list(struct net_device *dev)
 static int bcmgenet_set_mac_addr(struct net_device *dev, void *p)
 {
 	struct sockaddr *addr = p;
+	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
+	volatile struct uniMacRegs *umac = pDevCtrl->umac;
 
 	if (netif_running(dev))
 		return -EBUSY;
 
 	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
+	umac->mac_0 = (dev->dev_addr[0] << 24 |
+			dev->dev_addr[1] << 16 |
+			dev->dev_addr[2] << 8  |
+			dev->dev_addr[3]);
+	umac->mac_1 = dev->dev_addr[4] << 8 | dev->dev_addr[5];
 
 	return 0;
 }
@@ -1009,11 +1016,11 @@ static void bcmgenet_tx_reclaim(struct net_device *dev, int index)
 		lastCIndex = pDevCtrl->txRingCIndex[index];
 		nrTxBds = GENET_MQ_BD_CNT;
 	}
+
 #else
 	lastCIndex = pDevCtrl->txLastCIndex;
 	nrTxBds = TOTAL_DESC;
 #endif
-
 	c_index &= (nrTxBds - 1);
 
 	if (c_index >= lastCIndex)
@@ -1021,12 +1028,11 @@ static void bcmgenet_tx_reclaim(struct net_device *dev, int index)
 	else
 		lastTxedCnt = nrTxBds - lastCIndex + c_index;
 
-	TRACE(("%s: %s index=%d c_index=%d p_index=%d "
+
+	TRACE(("%s: %s index=%d c_index=%d "
 			"lastTxedCnt=%d txLastCIndex=%d\n",
 			__func__, pDevCtrl->dev->name, index,
-			c_index,
-			pDevCtrl->txDma->tDmaRings[index].tdma_producer_index,
-			lastTxedCnt, lastCIndex));
+			c_index, lastTxedCnt, lastCIndex));
 
 	/* Reclaim transmitted buffers */
 	while (lastTxedCnt-- > 0) {
@@ -1071,15 +1077,11 @@ static void bcmgenet_tx_reclaim(struct net_device *dev, int index)
 	} else{
 		if (pDevCtrl->txRingFreeBds[index] > (MAX_SKB_FRAGS + 1)
 			&& __netif_subqueue_stopped(dev, index+1)) {
-			pDevCtrl->intrl2_1->cpu_mask_set = (1<<index);
+			pDevCtrl->intrl2_1->cpu_mask_set = (1 << index);
 			netif_wake_subqueue(dev, index+1);
 		}
 		pDevCtrl->txRingCIndex[index] = c_index;
 	}
-	/*
-	 * Disable txdma bdone/pdone interrupt only if all
-	 * subqueues are active.
-	 */
 #else
 	if (pDevCtrl->txFreeBds > (MAX_SKB_FRAGS + 1)
 			&& netif_queue_stopped(dev)) {
@@ -1156,6 +1158,9 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 			return 1;
 		}
 	}
+	/* Reclaim xmited skb for each subqueue */
+	for (i = 0; i < GENET_MQ_CNT; i++)
+		bcmgenet_tx_reclaim(dev, i);
 #else
 	if (skb) {
 		nr_frags = skb_shinfo(skb)->nr_frags;
@@ -1178,13 +1183,16 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 		spin_unlock_irqrestore(&pDevCtrl->lock, flags);
 		return 0;
 	}
-
+	/*
+	 * reclaim xmited skb every 8 packets.
+	 */
 	if ((index == DESC_INDEX) &&
 		(pDevCtrl->txFreeBds < pDevCtrl->nrTxBds - 8))
 		bcmgenet_tx_reclaim(dev, index);
 
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
-	if ((index != DESC_INDEX) && (pDevCtrl->txRingFreeBds[index] < GENET_MQ_BD_CNT - 8))
+	if ((index != DESC_INDEX) && (pDevCtrl->txRingFreeBds[index]
+			< GENET_MQ_BD_CNT - 8))
 		bcmgenet_tx_reclaim(dev, index);
 #endif
 
@@ -1249,8 +1257,8 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 		txCBPtr->BdAddr->length_status = (
 			((unsigned long)((skb->len < ETH_ZLEN) ?
 			ETH_ZLEN : skb->len)) << 16) | DMA_SOP | DMA_EOP |
-			DMA_TX_APPEND_CRC | (DMA_TX_QTAG_MASK <<
-				DMA_TX_QTAG_SHIFT);
+			(DMA_TX_QTAG_MASK << DMA_TX_QTAG_SHIFT) |
+			DMA_TX_APPEND_CRC;
 
 		if (skb->ip_summed  == CHECKSUM_PARTIAL)
 			txCBPtr->BdAddr->length_status |= DMA_TX_DO_CSUM;
@@ -1289,9 +1297,10 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 		}
 		txCBPtr->dma_len = skb_headlen(skb);
 		txCBPtr->BdAddr->address = txCBPtr->dma_addr;
-		txCBPtr->BdAddr->length_status = (skb_headlen(skb) << 16)
-			| DMA_SOP | DMA_TX_APPEND_CRC |
-			(DMA_TX_QTAG_MASK << DMA_TX_QTAG_SHIFT);
+		txCBPtr->BdAddr->length_status = (skb_headlen(skb) << 16) |
+			(DMA_TX_QTAG_MASK << DMA_TX_QTAG_SHIFT) |
+			DMA_SOP | DMA_TX_APPEND_CRC;
+
 		if (skb->ip_summed  == CHECKSUM_PARTIAL)
 			txCBPtr->BdAddr->length_status |= DMA_TX_DO_CSUM;
 
@@ -1345,8 +1354,8 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 				frag->size, 0);
 #endif
 			txCBPtr->BdAddr->length_status =
-				((unsigned long)frag->size << 16) |
-				(DMA_TX_QTAG_MASK << DMA_TX_QTAG_SHIFT);
+					((unsigned long)frag->size << 16) |
+					(DMA_TX_QTAG_MASK << DMA_TX_QTAG_SHIFT);
 			if (i == nr_frags - 1)
 				txCBPtr->BdAddr->length_status |= DMA_EOP;
 
@@ -1373,10 +1382,11 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 			netif_stop_subqueue(dev, 0);
 			pDevCtrl->intrl2_0->cpu_mask_clear =
 				UMAC_IRQ_TXDMA_BDONE | UMAC_IRQ_TXDMA_PDONE;
+
 		}
 	} else if (pDevCtrl->txRingFreeBds[index] <= (MAX_SKB_FRAGS + 1)) {
 		netif_stop_subqueue(dev, index+1);
-		pDevCtrl->intrl2_1->cpu_mask_clear = (1<<index);
+		pDevCtrl->intrl2_1->cpu_mask_clear = (1 << index);
 	}
 #else
 	if (pDevCtrl->txFreeBds <= (MAX_SKB_FRAGS + 1)) {
@@ -1599,6 +1609,8 @@ static int bcmgenet_poll(struct napi_struct *napi, int budget)
 	unsigned int work_done;
 	work_done = bcmgenet_desc_rx(pDevCtrl, budget);
 
+	/* tx reclaim */
+	/*bcmgenet_xmit(NULL, pDevCtrl->dev);*/
 	/* Allocate new SKBs for the BD ring */
 	assign_rx_buffers(pDevCtrl);
 	/* Advancing our read pointer and consumer index*/
@@ -1939,9 +1951,10 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 	intrl2->cpu_clear |= pDevCtrl->irq1_stat;
 
 	TRACE(("%s: IRQ=0x%x\n", __func__, pDevCtrl->irq1_stat));
-
-	/* Check the MBDONE interrupts.
-		If packet is done, reclaim descriptors */
+	/*
+	 * Check the MBDONE interrupts.
+	 * packet is done, reclaim descriptors
+	 */
 	if (pDevCtrl->irq1_stat & 0x0000ffff) {
 		index = 0;
 		for (index = 0; index < 16; index++) {
@@ -2009,11 +2022,10 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
 	}
 #endif
 	if (pDevCtrl->irq0_stat &
-		(UMAC_IRQ_TXDMA_BDONE | UMAC_IRQ_TXDMA_PDONE)) {
+			(UMAC_IRQ_TXDMA_BDONE | UMAC_IRQ_TXDMA_PDONE)) {
 		/* Tx reclaim */
 		bcmgenet_xmit(NULL, pDevCtrl->dev);
 	}
-
 	if (pDevCtrl->irq0_stat & (UMAC_IRQ_PHY_DET_R |
 				UMAC_IRQ_PHY_DET_F |
 				UMAC_IRQ_LINK_UP |
@@ -2809,12 +2821,11 @@ static int bcmgenet_init_dev(struct BcmEnet_devctrl *pDevCtrl)
 	/* init dma registers */
 	init_edma(pDevCtrl);
 
-	TRACE(("%s done!\n", __func__));
-
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
 	pDevCtrl->nrTxBds = GENET_DEFAULT_BD_CNT;
 #endif
 
+	TRACE(("%s done!\n", __func__));
 	/* if we reach this point, we've init'ed successfully */
 	return 0;
 error1:
