@@ -1148,6 +1148,16 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 		next = list->next;
 		prefetch(next);
 		debug_rcu_head_unqueue(list);
+
+		unsigned long f = (unsigned long)list->func;
+		#define KSEG2 0xc0000000
+		#define KSEGX(a) (((unsigned long)(a)) & 0xe0000000)
+		if (KSEGX(f) == KSEG2) {
+			unsigned int *p = (unsigned int *)(list);
+			printk(KERN_ERR "Bad RCU 0x%08x %08x %08x %08x %08x %08x %08x %08x\n",
+			       p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+		}
+
 		list->func(list);
 		list = next;
 		if (++count >= rdp->blimit)
