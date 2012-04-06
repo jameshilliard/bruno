@@ -72,9 +72,26 @@
 #define GENET_DEFAULT_BD_CNT	\
 	(TOTAL_DESC - GENET_MQ_CNT * GENET_MQ_BD_CNT)
 
-static void bcmgenet_init_multiq(struct net_device *dev);
+/* Default # of bds for each priority rx queue for multi queue support. */
+#define	GENET_RX_MQ_BD_CNT		192
 
+static void bcmgenet_init_multiq(struct net_device *dev);
+static void bcmgenet_init_multiq_rx(struct net_device *dev);
+
+#else
+#define	GENET_RX_MQ_BD_CNT		0
 #endif	/*CONFIG_NET_SCH_MULTIQ */
+
+/* Default # of priority rx queues for multi queue support */
+#define	GENET_RX_MQ_CNT		1
+/* Total number or priority descriptors must be less than TOTAL_DESC */
+#define	GENET_RX_TOTAL_MQ_BD	(GENET_RX_MQ_CNT * GENET_RX_MQ_BD_CNT)
+#if GENET_RX_TOTAL_MQ_BD > TOTAL_DESC
+#error Total number or priority descriptors must be less than TOTAL_DESC.
+#else
+#define	GENET_DEFAULT_RX_BD_CNT	(TOTAL_DESC - GENET_RX_TOTAL_MQ_BD)
+#endif
+
 
 #define RX_BUF_LENGTH		2048
 #define RX_BUF_BITS			12
@@ -82,6 +99,44 @@ static void bcmgenet_init_multiq(struct net_device *dev);
 #define DMA_DESC_THRES		4
 #define HFB_TCP_LEN			19
 #define HFB_ARP_LEN			21
+
+/* NAPI budget for the default queue (queue 16) */
+#define	DEFAULT_DESC_BUDGET		GENET_DEFAULT_RX_BD_CNT
+#define	THROTTLED_DESC_BUDGET		2
+
+/*
+ * Length in bytes that we will match in the filter for 802.1Q packets
+ * This includes the source and destination mac addresses (6 bytes each)
+ * and the 802.1Q frame (4 bytes), for a total of 16 bytes.
+ */
+#define	HFB_8021Q_LEN			16
+
+/*
+ * Per IEEE 802.1Q, Tag Protocol Identifier (TPID): a 16-bit field set to a
+ * value of 0x8100 in order to identify the frame as an IEEE 802.1Q-tagged
+ * frame. This field is located at the same position as the EtherType/Length
+ * field in untagged frames, and is thus used to distinguish the frame from
+ * untagged frames.
+ */
+#define	TPID	0x8100
+/*
+ * Priority Code Point (PCP): a 3-bit field which refers to the IEEE 802.1p
+ * priority. It indicates the frame priority level. Values are from 0 (best
+ * effort) to 7 (highest); 1 represents the lowest priority. These values can be
+ * used to prioritize different classes of traffic (voice, video, data, etc.).
+ * See also Class of Service or CoS.
+ */
+#define	PCP_COUNT   8	/* Represented by 3 bits. */
+/* The first and last enabled priority. */
+#define	PCP_START   1	/* First PCP to enable. */
+#define	PCP_END	    7	/* Last PCP to enable. */
+
+/*
+ * Combination of interrupts that we process as a group.
+ */
+#define	UMAC_IRQ_HFB_OR_DONE \
+	(UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM | \
+	 UMAC_IRQ_RXDMA_BDONE| UMAC_IRQ_RXDMA_PDONE)
 
 /* Tx/Rx DMA register offset, skip 256 descriptors */
 #define GENET_TDMA_REG_OFF	(GENET_TDMA_OFF + \
@@ -131,7 +186,7 @@ static int bcmgenet_ring_poll(struct napi_struct *napi, int budget);
 /* --------------------------------------------------------------------------
 Process recived packet for descriptor based DMA
 --------------------------------------------------------------------------*/
-static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget);
+static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index);
 /* --------------------------------------------------------------------------
 Process recived packet for ring buffer DMA
 --------------------------------------------------------------------------*/
@@ -144,6 +199,10 @@ static int bcmgenet_init_dev(struct BcmEnet_devctrl *pDevCtrl);
 static void bcmgenet_uninit_dev(struct BcmEnet_devctrl *pDevCtrl);
 /* Assign the Rx descriptor ring */
 static int assign_rx_buffers(struct BcmEnet_devctrl *pDevCtrl);
+static int assign_rx_buffers_for_queue(struct BcmEnet_devctrl *pDevCtrl, int i);
+static int assign_rx_buffers_range(struct BcmEnet_devctrl *pDevCtrl,
+		unsigned long start_addr, unsigned long end_addr,
+		unsigned long read_ptr);
 /* Initialize the uniMac control registers */
 static int init_umac(struct BcmEnet_devctrl *pDevCtrl);
 /* Initialize DMA control register */
@@ -162,9 +221,15 @@ static void bcmgenet_clock_disable(struct BcmEnet_devctrl *pDevCtrl);
 /* S3 warm boot */
 static void save_state(struct BcmEnet_devctrl *pDevCtrl);
 static void restore_state(struct BcmEnet_devctrl *pDevCtrl);
+/* HFB filtering for PCP*/
+static void bcmgenet_enable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl);
+static void bcmgenet_disable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl);
 
 static struct net_device *eth_root_dev;
 static int DmaDescThres = DMA_DESC_THRES;
+
+/* Descriptor queue budget. */
+static int desc_budget = DEFAULT_DESC_BUDGET;
 
 #ifdef CONFIG_BCM7429A0
 static void bcm7429_ephy_workaround(struct BcmEnet_devctrl *pDevCtrl)
@@ -1606,23 +1671,43 @@ static int bcmgenet_poll(struct napi_struct *napi, int budget)
 			struct BcmEnet_devctrl, napi);
 	volatile struct intrl2Regs *intrl2 = pDevCtrl->intrl2_0;
 	volatile struct rDmaRingRegs *rDma_desc;
-	unsigned int work_done;
-	work_done = bcmgenet_desc_rx(pDevCtrl, budget);
+	unsigned int work_done, total_work_done = 0;
+	int local_budget;
+	int i;
 
-	/* tx reclaim */
-	/*bcmgenet_xmit(NULL, pDevCtrl->dev);*/
-	/* Allocate new SKBs for the BD ring */
-	assign_rx_buffers(pDevCtrl);
-	/* Advancing our read pointer and consumer index*/
-	rDma_desc = &pDevCtrl->rxDma->rDmaRings[DESC_INDEX];
-	rDma_desc->rdma_consumer_index += work_done;
-	rDma_desc->rdma_read_pointer += (work_done << 1);
-	rDma_desc->rdma_read_pointer &= ((TOTAL_DESC << 1)-1);
-	if (work_done < budget) {
-		napi_complete(napi);
-		intrl2->cpu_mask_clear |= UMAC_IRQ_RXDMA_BDONE;
+	/* Process the priority queues. */
+	for (i = 0, local_budget = GENET_RX_MQ_BD_CNT;
+		i < GENET_RX_MQ_CNT || i == DESC_INDEX;) {
+		work_done = bcmgenet_desc_rx(pDevCtrl, local_budget, i);
+		rDma_desc = &pDevCtrl->rxDma->rDmaRings[i];
+		rDma_desc->rdma_consumer_index += work_done;
+		total_work_done += work_done;
+		if (i == GENET_RX_MQ_CNT - 1) {
+			/* Process the default queue. */
+			i = DESC_INDEX;
+			local_budget = desc_budget;
+		} else {
+			i++;
+		}
 	}
-	return work_done;
+
+	/*
+	 * Per NAPI spec at
+	 *
+	 * http://www.linuxfoundation.org/collaborate/workgroups/networking/napi
+	 *
+	 * If packets remain to be processed (i.e. the driver used its entire
+	 * quota), poll() should return a value of one.
+	 * If, instead, all packets have been processed, your driver should
+	 * reenable interrupts, turn off polling, and return zero.
+	 */
+	if (total_work_done < budget) {
+		napi_complete(napi);
+		intrl2->cpu_mask_clear |= UMAC_IRQ_HFB_OR_DONE;
+		return 0;
+	} else {
+		return 1;
+	}
 }
 /*
  * NAPI polling for ring buffer.
@@ -1992,15 +2077,22 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
 	intrl2->cpu_clear |= pDevCtrl->irq0_stat;
 
 	TRACE(("IRQ=0x%x\n", pDevCtrl->irq0_stat));
+
+	/* If there is tagged traffic, throttle untagged traffic. */
+	if (pDevCtrl->irq0_stat & (UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM))
+		desc_budget = THROTTLED_DESC_BUDGET;
+	else
+		desc_budget = DEFAULT_DESC_BUDGET;
+
 #ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
-	if (pDevCtrl->irq0_stat & (UMAC_IRQ_RXDMA_BDONE|UMAC_IRQ_RXDMA_PDONE)) {
+	if (pDevCtrl->irq0_stat & UMAC_IRQ_HFB_OR_DONE) {
 		/*
 		 * We use NAPI(software interrupt throttling, if
 		 * Rx Descriptor throttling is not used.
 		 * Disable interrupt, will be enabled in the poll method.
 		 */
 		if (likely(napi_schedule_prep(&pDevCtrl->napi))) {
-			intrl2->cpu_mask_set |= UMAC_IRQ_RXDMA_BDONE;
+			intrl2->cpu_mask_set |= UMAC_IRQ_HFB_OR_DONE;
 			__napi_schedule(&pDevCtrl->napi);
 		}
 	}
@@ -2013,12 +2105,9 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
 		rDma_desc = &pDevCtrl->rxDma->rDmaRings[DESC_INDEX];
 		pDevCtrl->irq0_stat &= ~UMAC_IRQ_RXDMA_MBDONE;
 		TRACE(("%s: %d packets available\n", __func__, DmaDescThres));
-		work_done = bcmgenet_desc_rx(pDevCtrl, DmaDescThres);
-		/* Allocate new SKBs for the BD ring */
-		assign_rx_buffers(pDevCtrl);
+		work_done = bcmgenet_desc_rx(pDevCtrl, DmaDescThres,
+			DESC_INDEX);
 		rDma_desc->rdma_consumer_index += work_done;
-		rDma_desc->rdma_read_pointer += (work_done << 1);
-		rDma_desc->rdma_read_pointer &= ((TOTAL_DESC << 1)-1);
 	}
 #endif
 	if (pDevCtrl->irq0_stat &
@@ -2030,8 +2119,6 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
 				UMAC_IRQ_PHY_DET_F |
 				UMAC_IRQ_LINK_UP |
 				UMAC_IRQ_LINK_DOWN |
-				UMAC_IRQ_HFB_SM |
-				UMAC_IRQ_HFB_MM |
 				UMAC_IRQ_MPD_R)) {
 		/* all other interested interrupts handled in bottom half */
 		schedule_work(&pDevCtrl->bcmgenet_irq_work);
@@ -2043,7 +2130,7 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
  *  bcmgenet_desc_rx - descriptor based rx process.
  *  this could be called from bottom half, or from NAPI polling method.
  */
-static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget)
+static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 {
 	struct BcmEnet_devctrl *pDevCtrl = ptr;
 	struct net_device *dev = pDevCtrl->dev;
@@ -2053,13 +2140,19 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget)
 	int len;
 	unsigned int rxpktprocessed = 0, rxpkttoprocess = 0;
 	unsigned int p_index = 0, c_index = 0, read_ptr = 0;
+	unsigned long start_addr, end_addr;
+	volatile struct rDmaRingRegs *rDma_desc;
 
-	p_index = pDevCtrl->rxDma->rDmaRings[DESC_INDEX].rdma_producer_index;
+	rDma_desc = &pDevCtrl->rxDma->rDmaRings[index];
+
+	p_index = rDma_desc->rdma_producer_index;
 	p_index &= DMA_P_INDEX_MASK;
-	c_index = pDevCtrl->rxDma->rDmaRings[DESC_INDEX].rdma_consumer_index;
+	c_index = rDma_desc->rdma_consumer_index;
 	c_index &= DMA_C_INDEX_MASK;
-	read_ptr = pDevCtrl->rxDma->rDmaRings[DESC_INDEX].rdma_read_pointer;
+	read_ptr = rDma_desc->rdma_read_pointer;
 	read_ptr = ((read_ptr & DMA_RW_POINTER_MASK) >> 1);
+	start_addr = rDma_desc->rdma_start_addr;
+	end_addr = rDma_desc->rdma_end_addr;
 
 	if (p_index < c_index)
 		rxpkttoprocess = (DMA_C_INDEX_MASK+1) - c_index + p_index;
@@ -2073,9 +2166,9 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget)
 		dmaFlag = (pDevCtrl->rxBds[read_ptr].length_status & 0xffff);
 		len = ((pDevCtrl->rxBds[read_ptr].length_status)>>16);
 
-		TRACE(("%s:p_index=%d c_index=%d read_ptr=%d "
+		TRACE(("%s:index=%d, p_index=%d c_index=%d read_ptr=%d "
 			"len_stat=0x%08lx\n",
-			__func__, p_index, c_index, read_ptr,
+			__func__, index, p_index, c_index, read_ptr,
 			pDevCtrl->rxBds[read_ptr].length_status));
 
 		rxpktprocessed++;
@@ -2088,13 +2181,18 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget)
 
 		pDevCtrl->rxBds[read_ptr].address = 0;
 
-		if (read_ptr == pDevCtrl->nrRxBds-1)
-			read_ptr = 0;
-		else
+		if (read_ptr == (end_addr & DMA_RW_POINTER_MASK) >> 1) {
+			read_ptr = (start_addr & DMA_RW_POINTER_MASK) >> 1;
+		} else {
 			read_ptr++;
+		}
 
 		if (unlikely(!(dmaFlag & DMA_EOP) || !(dmaFlag & DMA_SOP))) {
-			printk(KERN_WARNING "Droping fragmented packet!\n");
+			printk(KERN_WARNING "Dropping fragmented packet: "
+				"index=%d, p_index=%d c_index=%d "
+				"read_ptr=%d len_stat=0x%08lx\n",
+				index, p_index, c_index, read_ptr,
+				pDevCtrl->rxBds[read_ptr].length_status);
 			dev->stats.rx_dropped++;
 			dev->stats.rx_errors++;
 			dev_kfree_skb_any(cb->skb);
@@ -2172,24 +2270,29 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget)
 		TRACE(("pushed up to kernel\n"));
 	}
 
+	if (rxpktprocessed) {
+		/*
+		 * assign_rx_buffers_for_queue() uses the current
+		 * rdma_read_pointer so do not update it until after
+		 * assign_rx_buffers_for_queue has been called.
+		 */
+		assign_rx_buffers_for_queue(pDevCtrl, index);
+		rDma_desc->rdma_read_pointer = (read_ptr << 1) &
+			DMA_RW_POINTER_MASK;
+	}
+
 	return rxpktprocessed;
 }
 
 
 /*
  * assign_rx_buffers:
- * Assign skb to RX DMA descriptor.
+ * Assign skb to RX DMA descriptor. Used during initialization.
  */
 static int assign_rx_buffers(struct BcmEnet_devctrl *pDevCtrl)
 {
-	struct sk_buff *skb;
-	unsigned short bdsfilled = 0;
+	unsigned short bdsfilled;
 	unsigned long flags;
-	struct Enet_CB *cb;
-
-	TRACE(("%s\n", __func__));
-
-	/* This function may be called from irq bottom-half. */
 
 #ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
 	(void)flags;
@@ -2197,10 +2300,66 @@ static int assign_rx_buffers(struct BcmEnet_devctrl *pDevCtrl)
 #else
 	spin_lock_irqsave(&pDevCtrl->lock, flags);
 #endif
+	bdsfilled = assign_rx_buffers_range(pDevCtrl, 0, 2*TOTAL_DESC - 1, 0);
 
-	/* loop here for each buffer needing assign */
-	while (pDevCtrl->rxBdAssignPtr->address == 0) {
-		cb = &pDevCtrl->rxCbs[pDevCtrl->rxBdAssignPtr-pDevCtrl->rxBds];
+#ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
+	spin_unlock_bh(&pDevCtrl->bh_lock);
+#else
+	spin_unlock_irqrestore(&pDevCtrl->lock, flags);
+#endif
+
+	return bdsfilled;
+}
+
+/*
+ * assign_rx_buffers for queue[index].
+ */
+static int assign_rx_buffers_for_queue(struct BcmEnet_devctrl *pDevCtrl,
+		int index)
+{
+	unsigned short bdsfilled;
+	unsigned long flags;
+	volatile struct rDmaRingRegs *rDma_desc;
+
+#ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
+	(void)flags;
+	spin_lock_bh(&pDevCtrl->bh_lock);
+#else
+	spin_lock_irqsave(&pDevCtrl->lock, flags);
+#endif
+	rDma_desc = &pDevCtrl->rxDma->rDmaRings[index];
+
+	bdsfilled = assign_rx_buffers_range(pDevCtrl,
+			rDma_desc->rdma_start_addr,
+			rDma_desc->rdma_end_addr,
+			rDma_desc->rdma_read_pointer);
+	/* Enable rx DMA in case it was disabled due to running out of rx BD */
+	pDevCtrl->rxDma->rdma_ctrl |= DMA_EN;
+
+#ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
+	spin_unlock_bh(&pDevCtrl->bh_lock);
+#else
+	spin_unlock_irqrestore(&pDevCtrl->lock, flags);
+#endif
+
+	return bdsfilled;
+}
+
+
+/*
+ * Assign buffers for addresses between start_addr and end_addr.
+ */
+static int assign_rx_buffers_range(struct BcmEnet_devctrl *pDevCtrl,
+		unsigned long start_addr, unsigned long end_addr,
+		unsigned long read_pointer) {
+	struct sk_buff *skb;
+	struct Enet_CB *cb;
+	unsigned short bdsfilled = 0;
+	unsigned long read_ptr;
+
+	read_ptr = (read_pointer & DMA_RW_POINTER_MASK) >> 1;
+	while (pDevCtrl->rxBds[read_ptr].address == 0) {
+		cb = &pDevCtrl->rxCbs[read_ptr];
 		skb = netdev_alloc_skb(pDevCtrl->dev,
 				pDevCtrl->rxBufLen + SKB_ALIGNMENT);
 		if (!skb) {
@@ -2215,29 +2374,17 @@ static int assign_rx_buffers(struct BcmEnet_devctrl *pDevCtrl)
 		cb->dma_addr = dma_map_single(&pDevCtrl->dev->dev,
 			skb->data, pDevCtrl->rxBufLen, DMA_FROM_DEVICE);
 		/* assign packet, prepare descriptor, and advance pointer */
-		pDevCtrl->rxBdAssignPtr->address = cb->dma_addr;
-		pDevCtrl->rxBdAssignPtr->length_status =
+		pDevCtrl->rxBds[read_ptr].address = cb->dma_addr;
+		pDevCtrl->rxBds[read_ptr].length_status =
 			(pDevCtrl->rxBufLen << 16);
 
 		/* turn on the newly assigned BD for DMA to use */
-		if (pDevCtrl->rxBdAssignPtr ==
-				pDevCtrl->rxBds+pDevCtrl->nrRxBds-1)
-			pDevCtrl->rxBdAssignPtr = pDevCtrl->rxBds;
-		else
-			pDevCtrl->rxBdAssignPtr++;
-
+		if (read_ptr == (end_addr & DMA_RW_POINTER_MASK) >> 1) {
+			read_ptr = (start_addr & DMA_RW_POINTER_MASK) >> 1;
+		} else {
+			read_ptr++;
+		}
 	}
-
-	/* Enable rx DMA incase it was disabled due to running out of rx BD */
-	pDevCtrl->rxDma->rdma_ctrl |= DMA_EN;
-
-#ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
-	spin_unlock_bh(&pDevCtrl->bh_lock);
-#else
-	spin_unlock_irqrestore(&pDevCtrl->lock, flags);
-#endif
-
-	TRACE(("%s return bdsfilled=%d\n", __func__, bdsfilled));
 	return bdsfilled;
 }
 
@@ -2325,6 +2472,9 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 	intrl2->cpu_clear = 0xFFFFFFFF;
 	intrl2->cpu_mask_clear = 0x0;
 
+	/* Enable HFB single match and multiple match interrupts. */
+	intrl2->cpu_mask_clear |= (UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM);
+
 #ifdef CONFIG_BCMGENET_RX_DESC_THROTTLE
 	intrl2->cpu_mask_clear |= UMAC_IRQ_RXDMA_MBDONE;
 #else
@@ -2378,17 +2528,19 @@ static void init_edma(struct BcmEnet_devctrl *pDevCtrl)
 	pDevCtrl->rxDma->rdma_scb_burst_size = DMA_MAX_BURST_LENGTH;
 	/* by default, enable ring 16 (descriptor based) */
 	rDma_desc = &pDevCtrl->rxDma->rDmaRings[DESC_INDEX];
-	rDma_desc->rdma_write_pointer = 0;
 	rDma_desc->rdma_producer_index = 0;
 	rDma_desc->rdma_consumer_index = 0;
-	rDma_desc->rdma_ring_buf_size = ((TOTAL_DESC << DMA_RING_SIZE_SHIFT) |
-		RX_BUF_LENGTH);
-	rDma_desc->rdma_start_addr = 0;
+	/* Initialize default queue. */
+	BUG_ON(GENET_RX_TOTAL_MQ_BD > TOTAL_DESC);
+	rDma_desc->rdma_ring_buf_size = ((GENET_DEFAULT_RX_BD_CNT <<
+				DMA_RING_SIZE_SHIFT) | RX_BUF_LENGTH);
+	rDma_desc->rdma_start_addr = 2*GENET_RX_TOTAL_MQ_BD;
 	rDma_desc->rdma_end_addr = 2*TOTAL_DESC - 1;
+	rDma_desc->rdma_read_pointer = 2*GENET_RX_TOTAL_MQ_BD;
+	rDma_desc->rdma_write_pointer = 2*GENET_RX_TOTAL_MQ_BD;
 	rDma_desc->rdma_xon_xoff_threshold = ((DMA_FC_THRESH_LO
 			<< DMA_XOFF_THRESHOLD_SHIFT) |
 			DMA_FC_THRESH_HI);
-	rDma_desc->rdma_read_pointer = 0;
 
 #ifdef CONFIG_BCMGENET_RX_DESC_THROTTLE
 	/*
@@ -2425,6 +2577,9 @@ static void init_edma(struct BcmEnet_devctrl *pDevCtrl)
 	pDevCtrl->txFreeBds = GENET_DEFAULT_BD_CNT;
 	/* initiaize multi xmit queue */
 	bcmgenet_init_multiq(pDevCtrl->dev);
+
+	/* Initialize priority rx queues. */
+	bcmgenet_init_multiq_rx(pDevCtrl->dev);
 
 #else
 	tDma_desc->tdma_ring_buf_size = ((TOTAL_DESC << DMA_RING_SIZE_SHIFT) |
@@ -2661,6 +2816,63 @@ int bcmgenet_uninit_ringbuf(struct net_device *dev, int direction,
 }
 EXPORT_SYMBOL(bcmgenet_uninit_ringbuf);
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
+static void bcmgenet_init_multiq_rx(struct net_device *dev)
+{
+	int i, dma_enable;
+	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
+
+	dma_enable = pDevCtrl->rxDma->rdma_ctrl & DMA_EN;
+	pDevCtrl->rxDma->rdma_ctrl &= ~DMA_EN;
+	for (i = 0; i < GENET_RX_MQ_CNT; i++) {
+		volatile struct rDmaRingRegs *rDma_desc;
+		rDma_desc = &pDevCtrl->rxDma->rDmaRings[i];
+
+		pDevCtrl->rxRingCbs[i] = pDevCtrl->rxCbs +
+			i * GENET_RX_MQ_BD_CNT;
+		pDevCtrl->rxRingSize[i] = GENET_RX_MQ_BD_CNT;
+		pDevCtrl->rxRingCIndex[i] = 0;
+
+		rDma_desc->rdma_producer_index = 0;
+		rDma_desc->rdma_consumer_index = 0;
+		rDma_desc->rdma_ring_buf_size =
+			(GENET_RX_MQ_BD_CNT << DMA_RING_SIZE_SHIFT) |
+			RX_BUF_LENGTH;
+		rDma_desc->rdma_start_addr = 2 * i * GENET_RX_MQ_BD_CNT;
+		rDma_desc->rdma_end_addr = 2 * (i + 1)*GENET_RX_MQ_BD_CNT - 1;
+		rDma_desc->rdma_mbuf_done_threshold = 1;
+		rDma_desc->rdma_write_pointer = 2 * i * GENET_RX_MQ_BD_CNT;
+		rDma_desc->rdma_read_pointer = 2 * i * GENET_RX_MQ_BD_CNT;
+
+		/* Enable this descriptor ring. */
+		pDevCtrl->rxDma->rdma_ring_cfg |= (1 << i);
+		pDevCtrl->rxDma->rdma_ctrl |=
+			(1 << (i + DMA_RING_BUF_EN_SHIFT));
+		rDma_desc->rdma_xon_xoff_threshold =
+			(DMA_FC_THRESH_LO << DMA_XOFF_THRESHOLD_SHIFT) |
+			DMA_FC_THRESH_HI;
+	}
+	/*
+	 * There are a total of 8 rdma_index2ring registers. Each nibble
+	 * of each register controls one filter_index->queue_index mapping.
+	 * In order to have filter_index mapped to queue_index, the register
+	 * needs to be programmed as following:
+	 *     register = filter_index / 8;
+	 *     nibbble = filter_index % 8;
+	 *     rdma_index2ring[register] &= ~(0xf << (nibble * 4));
+	 *     rdma_index2ring[register] |= (queue_index << (nibble * 4));
+	 * If we have 8 filters enabled, and would like to map each filter
+	 * to a priority with the same index, we would do
+	 *     pDevCtrl->rxDma->rdma_index2ring[0] = 0x76543210;
+	 *
+	 * Since we have only one priority queue at the moment, we will map all
+	 * 8 prioritized traffic to queue 0. Should the number of priority
+	 * queues change, the following mapping will need to changed as well.
+	 */
+	pDevCtrl->rxDma->rdma_index2ring[0] = 0x0;
+
+	if (dma_enable)
+		pDevCtrl->rxDma->rdma_ctrl |= DMA_EN;
+}
 /*
  * init multi xmit queues, only available for GENET2
  * the queue is partitioned as follows:
@@ -2826,6 +3038,10 @@ static int bcmgenet_init_dev(struct BcmEnet_devctrl *pDevCtrl)
 #endif
 
 	TRACE(("%s done!\n", __func__));
+
+	/* Enable HFB filtering. */
+	bcmgenet_enable_hfb_for_pcp(pDevCtrl);
+
 	/* if we reach this point, we've init'ed successfully */
 	return 0;
 error1:
@@ -2844,6 +3060,9 @@ static void bcmgenet_uninit_dev(struct BcmEnet_devctrl *pDevCtrl)
 	int i;
 
 	if (pDevCtrl) {
+		/* Disable HFB filtering. */
+		bcmgenet_disable_hfb_for_pcp(pDevCtrl);
+
 		/* disable DMA */
 		pDevCtrl->rxDma->rdma_ctrl = 0;
 		pDevCtrl->txDma->tdma_ctrl = 0;
@@ -2912,6 +3131,75 @@ do { \
 #define	HFB_FILTER_DISABLE_ALL(dev) \
 	(GENET_HFB_CTRL(dev) &= ~(0xffff << (RBUF_HFB_FILTER_EN_SHIFT)))
 #endif
+
+/*
+ * Enable PCP (Priority Code Point) filtering in HFB.
+ */
+void bcmgenet_enable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl)
+{
+	int filter;
+	int filter_size; /* filter size in unsigned long */
+	int filter_len = HFB_8021Q_LEN;
+
+	filter_size = (GENET_HFB_CTRL(pDevCtrl) & RBUF_HFB_256B) ? 128 : 64;
+
+	/* Clear all filters. */
+	memset((void*)pDevCtrl->hfb, 0,
+		HFB_NUM_FLTRS * filter_size * sizeof (unsigned long));
+
+	/*
+	 * Enable PCP. Do not map PCP 0 so that traffic with
+	 * PCP set to 0 will go to the default queue.
+	 */
+	for (filter = PCP_START; filter <= PCP_END; filter++) {
+		unsigned long *addr = &pDevCtrl->hfb[filter * filter_size];
+
+		BUG_ON(PCP_START < 0 || PCP_START >= PCP_COUNT);
+		BUG_ON(PCP_END < 0 || PCP_END >= PCP_COUNT);
+		printk(KERN_INFO "%s: Enabling filter %d\n",
+				__func__, filter);
+
+		/*
+		 * Mask the first 12 bytes (destination mac address, source mac
+		 * address. This involves setting the first 24 bytes (NOT 12!)
+		 * of the filter to 0, which is already done by the bzero above.
+		 * Simple move the address pointer. The format of each filter
+		 * is of the following format:
+		 *
+		 * 31        23     15     7     0
+		 * -------------------------------
+		 * | unused | Mask |  B0  |  B1  |
+		 * -------------------------------
+		 */
+		addr += 6;
+
+		/* Match the next 4 nibbles (TPID). */
+		*addr++ = 0xf << 16 | TPID;
+		/* Match the next nibble (PCP and CFI). Mask 3 nibbles (VID). */
+		*addr = 0x8 << 16 | filter << 13;
+
+		/* Set the filter length. */
+		SET_HFB_FILTER_LEN(pDevCtrl, filter, filter_len);
+
+		/* Enable the filter. */
+		HFB_FILTER_ENABLE(pDevCtrl, filter);
+	}
+	GENET_HFB_CTRL(pDevCtrl) |= RBUF_HFB_EN;
+}
+
+void bcmgenet_disable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl)
+{
+	int filter_size = (GENET_HFB_CTRL(pDevCtrl) & RBUF_HFB_256B) ? 128 : 64;
+	int filter;
+
+	GENET_HFB_CTRL(pDevCtrl) &= ~RBUF_HFB_EN;
+
+	for (filter = PCP_START; filter <= PCP_END; filter++) {
+		HFB_FILTER_DISABLE(pDevCtrl, filter);
+	}
+	memset((void *)pDevCtrl->hfb, 0,
+		PCP_COUNT * filter_size * sizeof (unsigned long));
+}
 
 /*
  * Program ACPI pattern into HFB. Return filter index if succesful.
