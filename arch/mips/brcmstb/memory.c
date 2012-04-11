@@ -73,7 +73,7 @@ static int __init brcm_memc1_bmem(void)
 			brcm_dram1_size_mb > brcm_dram1_linux_mb &&
 			n_bmem_regions < MAX_BMEM_REGIONS) {
 		r = &bmem_regions[n_bmem_regions++];
-		r->addr = brcm_dram1_start + (brcm_dram1_linux_mb << 20);
+		r->addr = brcm_dram1_start;
 		r->size = (brcm_dram1_size_mb - brcm_dram1_linux_mb) << 20;
 		r->valid = 1;
 		printk(KERN_INFO "bmem: adding extra %lu MB RESERVED region at "

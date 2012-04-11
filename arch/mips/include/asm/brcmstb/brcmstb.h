@@ -759,6 +759,7 @@ extern unsigned long brcm_mtd_kernel_len;
 extern unsigned long brcm_mtd_ocap_start;
 extern unsigned long brcm_mtd_ocap_len;
 extern unsigned long brcm_mtd_flash_size_mb;
+extern int cfe_splashmem_present;
 
 #ifdef CONFIG_BRCM_SLOW_TVM_CLOCK
 #define BRCM_BASE_BAUD_TVM	(54000000 / 16)

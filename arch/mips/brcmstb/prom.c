@@ -43,6 +43,7 @@
 
 #include <spaces.h>
 
+int cfe_splashmem_present = 0;
 unsigned long brcm_dram0_size_mb;
 unsigned long brcm_dram1_size_mb;
 unsigned long brcm_dram1_linux_mb;
@@ -355,6 +356,40 @@ static void __init brcm_setup_early_printk(void)
 	init_port();
 }
 
+#define SPLASH_TOKEN "splashmem="
+static int parse_splash_mem(const char *arcs_cmdline,
+			    unsigned long *start,
+			    unsigned long *size)
+{
+	char *ptr;
+	char *end;
+	char *endptr;	/* local pointer to end of parsed string */
+
+	ptr = strstr(arcs_cmdline, SPLASH_TOKEN);
+	if (!ptr) {
+		printk(KERN_INFO "No splashmem present\n");
+		return -1;
+	}
+	end = strstr(ptr, "@memc1");
+	if (!end) {
+		printk(KERN_WARNING "Invalid mem bank for splashmem\n");
+		return -1;
+	}
+
+	ptr += sizeof(SPLASH_TOKEN);
+	*start = (unsigned long)memparse(ptr, &endptr);
+
+	ptr = strchr(endptr, '/');
+	if (!ptr) {
+		printk(KERN_WARNING "Invalid splashmem format\n");
+		return -1;
+	}
+	++ptr;
+	*size = (unsigned long)memparse(ptr, &endptr);
+        cfe_splashmem_present = 1;
+	return 0;
+}
+
 /***********************************************************************
  * Main entry point
  ***********************************************************************/
@@ -466,9 +501,38 @@ void __init prom_init(void)
 			"available memory (%lu MB); ignoring\n",
 			brcm_dram1_linux_mb, brcm_dram1_size_mb);
 		brcm_dram1_linux_mb = 0;
-	} else if (brcm_dram1_linux_mb)
-		add_memory_region(MEMC1_START, brcm_dram1_linux_mb << 20,
-			BOOT_MEM_RAM);
+	} else if (brcm_dram1_linux_mb) {
+		/* Since the bootloader can only map the first 256M of memc1
+		 * when it boots, if we get memc1= request from bootloader, we
+		 * should try to pull the memory from the end to avoid crossing
+		 * over the memory that is allocated for boot logo image by
+                 * bootloader.
+		 */
+		unsigned long start_mb, start_b, size, splash_bound = 0;
+		if (0 == parse_splash_mem(arcs_cmdline, &splash_bound, &size)) {
+			splash_bound += size;
+		}
+
+		start_mb = brcm_dram1_size_mb - brcm_dram1_linux_mb;
+		start_b  = start_mb << 20;
+		if (splash_bound > start_b) {
+			unsigned long orig_dram1 = brcm_dram1_linux_mb;
+			start_mb = (splash_bound + 0x000FFFFF) >> 20;
+			start_b = start_mb << 20;
+			brcm_dram1_linux_mb = brcm_dram1_size_mb - start_mb;
+			printk(KERN_WARNING "warning: 'memc1=%luM' starts "
+			       " before splash memory bound (0x%lx);"
+			       " adjusting to (memc1=%luM)\n",
+			       orig_dram1, splash_bound, brcm_dram1_linux_mb);
+		}
+		printk(KERN_INFO "memc1: adding %luMB at %luMB "
+		       "(0x%08lx@0x%08lx)",
+		       brcm_dram1_linux_mb, (MEMC1_START >> 20) + start_mb,
+		       brcm_dram1_linux_mb << 20, MEMC1_START + start_b);
+		add_memory_region(MEMC1_START + start_b,
+				  brcm_dram1_linux_mb << 20,
+				  BOOT_MEM_RAM);
+	}
 #else
 	if (brcm_dram1_linux_mb) {
 		printk(KERN_WARNING "warning: MEMC1 is not available on this "

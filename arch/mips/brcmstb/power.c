@@ -674,7 +674,12 @@ static int __init brcm_pm_init(void)
 		return 0;
 	if (!brcm_moca_enabled)
 		brcm_pm_moca_disable(0);
-	brcm_pm_suntop_disable();
+	if (!cfe_splashmem_present) {
+		/* Old versions of CFE didn't provide the splashmem= parameter
+		 * even though they used splashmem. To avoid memory conflicts
+		 * on old systems, disable the video memory at boot time. */
+		brcm_pm_suntop_disable();
+	}
 
 	/* chip specific initialization */
 	brcm_pm_initialize();
