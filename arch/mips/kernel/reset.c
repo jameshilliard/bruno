@@ -27,12 +27,14 @@ EXPORT_SYMBOL(pm_power_off);
 
 void machine_restart(char *command)
 {
+	dma_cache_wback_inv(0, ~0);
 	if (_machine_restart)
 		_machine_restart(command);
 }
 
 void machine_halt(void)
 {
+	dma_cache_wback_inv(0, ~0);
 	if (_machine_halt)
 		_machine_halt();
 }
