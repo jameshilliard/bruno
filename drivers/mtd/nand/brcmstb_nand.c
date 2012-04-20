@@ -684,6 +684,7 @@ static int brcmstb_nand_read(struct mtd_info *mtd,
 	struct nand_chip *chip, u64 addr, unsigned int trans,
 	u32 *buf, u8 *oob)
 {
+	static unsigned uncorrectable_count;
 	struct brcmstb_nand_host *host = chip->priv;
 	u64 err_addr;
 	bool use_edu;
@@ -712,8 +713,20 @@ static int brcmstb_nand_read(struct mtd_info *mtd,
 	err_addr = BDEV_RD(BCHP_NAND_ECC_UNC_ADDR) |
 		((u64)(BDEV_RD(BCHP_NAND_ECC_UNC_EXT_ADDR) & 0xffff) << 32);
 	if (err_addr != 0) {
-		dev_warn(&host->pdev->dev, "uncorrectable error at 0x%llx\n",
-			(unsigned long long)err_addr);
+		/* Note: if this overflows, the worst that will happen is
+		 * we print a few more messages.  But it would take months
+		 * of nonstop errors to overflow, and the system would
+		 * probably be dead by then.
+		 */
+		if (++uncorrectable_count < 50) {
+			dev_warn(&host->pdev->dev,
+				"uncorrectable error at 0x%llx\n",
+				(unsigned long long)err_addr);
+		} else if (uncorrectable_count == 50) {
+			dev_warn(&host->pdev->dev,
+				"too many uncorrectable errors; not warning "
+				"any further.\n");
+		}
 		if (use_edu)
 			brcmstb_nand_read_by_pio(mtd, chip, addr, trans, buf,
 					oob);
