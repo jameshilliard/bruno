@@ -846,8 +846,8 @@ static int __initdata nandcs[NUM_CS];
 #define BRUNO_KERNEL1_NAME     "kernel1"
 #define BRUNO_ROOTFS0_NAME     "rootfs0"
 #define BRUNO_ROOTFS1_NAME     "rootfs1"
-#define BRUNO_DATA_NAME        "data"
-#define BRUNO_MISC_NAME        "misc"
+#define BRUNO_DATA_NAME        "data+ubi"
+#define BRUNO_MISC_NAME        "misc+ubi"
 
 #define BRUNO_CFE_SIZE         0x00200000UL
 #define BRUNO_HNVRAM_SIZE      0x00170000UL
