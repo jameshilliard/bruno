@@ -144,6 +144,23 @@ static void bcmgenet_init_multiq_rx(struct net_device *dev);
 #define GENET_RDMA_REG_OFF	(GENET_RDMA_OFF + \
 		2*TOTAL_DESC*sizeof(unsigned long))
 
+#ifdef	CONFIG_BRUNO
+#define	GENET0_DEVICE_NAME	    "eth0"
+/*
+ * GENET MDIO Configuration Register.
+ *
+ * 31       10 9              4 3      1           0
+ * --------------------------------------------------
+ * | Reserved |mdio_clk_divider|Reserved|mdio_clause|
+ * --------------------------------------------------
+ * MDIO clock (MDC) = system clock / 2 * (MDIO_CLK_DIVIDER + 1)
+ * With system clock = 108Mhz, mdio_clk_divider = 0x4, MDC = 10.8MHz.
+ */
+#define	CLOCK_DIVIDER_SHIFT	    4
+#define	CLOCK_DIVIDER_MASK	    0x3F
+#define	CLOCK_DIVIDER_10MHZ	    0x4
+#endif	/* CONFIG_BRUNO */
+
 /* --------------------------------------------------------------------------
 External, indirect entry points.
 --------------------------------------------------------------------------*/
@@ -604,6 +621,18 @@ static int bcmgenet_open(struct net_device *dev)
 	TRACE(("%s: bcmgenet_open\n", dev->name));
 
 	bcmgenet_clock_enable(pDevCtrl);
+
+#ifdef	CONFIG_BRUNO
+	/*
+	 * Set the clock divider to 0x04 to generate a 10.8MHz clock.
+	 */
+	if (strcmp(dev->name, GENET0_DEVICE_NAME) == 0) {
+		volatile unsigned long val = pDevCtrl->umac->mdio_cfg;
+		val &= ~(CLOCK_DIVIDER_MASK << CLOCK_DIVIDER_SHIFT);
+		val |= (CLOCK_DIVIDER_10MHZ << CLOCK_DIVIDER_SHIFT);
+		pDevCtrl->umac->mdio_cfg = val;
+	}
+#endif	/* CONFIG_BRUNO */
 
 	GENET_RBUF_FLUSH_CTRL(pDevCtrl) = 0;
 
@@ -3152,13 +3181,11 @@ void bcmgenet_enable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl)
 	 * PCP set to 0 will go to the default queue.
 	 */
 	for (filter = PCP_START; filter <= PCP_END; filter++) {
-		unsigned long *addr = &pDevCtrl->hfb[filter * filter_size];
+		volatile unsigned long *addr =
+			&pDevCtrl->hfb[filter * filter_size];
 
 		BUG_ON(PCP_START < 0 || PCP_START >= PCP_COUNT);
 		BUG_ON(PCP_END < 0 || PCP_END >= PCP_COUNT);
-		printk(KERN_INFO "%s: Enabling filter %d\n",
-				__func__, filter);
-
 		/*
 		 * Mask the first 12 bytes (destination mac address, source mac
 		 * address. This involves setting the first 24 bytes (NOT 12!)
