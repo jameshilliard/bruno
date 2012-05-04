@@ -231,14 +231,14 @@ config DM_SNAPSHOT
        tristate "Snapshot target"
        depends on BLK_DEV_DM
        ---help---
-         Allow volume managers to take writable snapshots of a device.
+	 Allow volume managers to take writable snapshots of a device.
 
 config DM_MIRROR
        tristate "Mirror target"
        depends on BLK_DEV_DM
        ---help---
-         Allow volume managers to mirror logical volumes, also
-         needed for live data migration tools such as 'pvmove'.
+	 Allow volume managers to mirror logical volumes, also
+	 needed for live data migration tools such as 'pvmove'.
 
 config DM_LOG_USERSPACE
 	tristate "Mirror userspace logging (EXPERIMENTAL)"
@@ -302,5 +302,35 @@ config DM_UEVENT
 	depends on BLK_DEV_DM && EXPERIMENTAL
 	---help---
 	Generate udev events for DM events.
+
+config DM_BHT
+	tristate "Block hash tree support"
+	select CRYPTO
+	select CRYPTO_HASH
+	---help---
+	Include support for device-mapper devices to use a block hash
+	tree for managing data integrity checks in a scalable way.
+
+	Targets that use this functionality should include it
+	automatically.
+
+	If unsure, say N.
+
+config DM_VERITY
+	tristate "Verity target support"
+	depends on BLK_DEV_DM
+	select DM_BHT
+	select CRYPTO
+	select CRYPTO_HASH
+	---help---
+	This device-mapper target allows you to create a device that
+	transparently integrity checks the data on it. You'll need to
+	activate the digests you're going to use in the cryptoapi
+	configuration.
+
+	To compile this code as a module, choose M here: the module will
+	be called dm-verity.
+
+	If unsure, say N.
 
 endif # MD

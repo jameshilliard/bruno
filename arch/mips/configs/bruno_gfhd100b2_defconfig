@@ -57,36 +57,23 @@ CONFIG_CAVIUM_OCTEON_HELPER=y
 # Broadcom STB options
 #
 # CONFIG_BRCM_LEGACY is not set
-# CONFIG_BCM35125C0 is not set
-# CONFIG_BCM35126B0 is not set
-# CONFIG_BCM35230C0 is not set
-# CONFIG_BCM35330A0 is not set
 # CONFIG_BCM7125C0 is not set
-# CONFIG_BCM7231A0 is not set
 # CONFIG_BCM7231B0 is not set
 # CONFIG_BCM7340B0 is not set
-# CONFIG_BCM7342B0 is not set
-# CONFIG_BCM7344A0 is not set
 # CONFIG_BCM7344B0 is not set
-# CONFIG_BCM7346A0 is not set
 # CONFIG_BCM7346B0 is not set
 # CONFIG_BCM7358A0 is not set
 # CONFIG_BCM7405B0 is not set
 # CONFIG_BCM7405D0 is not set
 # CONFIG_BCM7408B0 is not set
 # CONFIG_BCM7420C0 is not set
-# CONFIG_BCM7425A0 is not set
 CONFIG_BCM7425B0=y
 # CONFIG_BCM7429A0 is not set
 # CONFIG_BCM7435A0 is not set
 # CONFIG_BCM7468B0 is not set
 # CONFIG_BCM7550A0 is not set
 # CONFIG_BCM7550B0 is not set
-# CONFIG_BCM7552A0 is not set
 # CONFIG_BCM7552B0 is not set
-# CONFIG_BCM7631B0 is not set
-# CONFIG_BCM7640A0 is not set
-# CONFIG_BCM7640B0 is not set
 
 #
 # Memory map
@@ -1201,7 +1188,19 @@ CONFIG_ATA_BMDMA=y
 #
 # CONFIG_ATA_GENERIC is not set
 # CONFIG_PATA_LEGACY is not set
-# CONFIG_MD is not set
+CONFIG_MD=y
+# CONFIG_BLK_DEV_MD is not set
+CONFIG_BLK_DEV_DM=y
+CONFIG_DM_DEBUG=y
+# CONFIG_DM_CRYPT is not set
+CONFIG_DM_BHT=y
+CONFIG_DM_VERITY=y
+# CONFIG_DM_SNAPSHOT is not set
+# CONFIG_DM_MIRROR is not set
+# CONFIG_DM_ZERO is not set
+# CONFIG_DM_MULTIPATH is not set
+# CONFIG_DM_DELAY is not set
+# CONFIG_DM_UEVENT is not set
 # CONFIG_FUSION is not set
 
 #
@@ -2247,7 +2246,7 @@ CONFIG_CRYPTO_CRC32C=y
 # CONFIG_CRYPTO_RMD256 is not set
 # CONFIG_CRYPTO_RMD320 is not set
 # CONFIG_CRYPTO_SHA1 is not set
-# CONFIG_CRYPTO_SHA256 is not set
+CONFIG_CRYPTO_SHA256=y
 # CONFIG_CRYPTO_SHA512 is not set
 # CONFIG_CRYPTO_TGR192 is not set
 # CONFIG_CRYPTO_WP512 is not set
