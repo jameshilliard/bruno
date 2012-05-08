@@ -37,6 +37,7 @@ obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o dm-log.o dm-region-hash.o
 obj-$(CONFIG_DM_LOG_USERSPACE)	+= dm-log-userspace.o
 obj-$(CONFIG_DM_BHT)		+= dm-bht.o
 obj-$(CONFIG_DM_VERITY)		+= dm-verity.o
+obj-$(CONFIG_DM_VERITY_BRUNO)	+= dm-verity-bruno.o
 obj-$(CONFIG_DM_ZERO)		+= dm-zero.o
 
 ifeq ($(CONFIG_DM_UEVENT),y)
