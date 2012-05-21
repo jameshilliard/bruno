@@ -224,8 +224,7 @@ static __init char *log_buf_alloc(unsigned long size, unsigned *dest_offset)
 			where);
 		if (new_logbits->magic != PERSIST_MAGIC ||
 				new_logbits->_log_buf_len != size ||
-				new_logbits->_logged_chars > size ||
-				new_logbits->_log_end > size * 2) {
+				new_logbits->_logged_chars > size) {
 			printk(KERN_INFO "printk_persist: header invalid, "
 				"cleared.\n");
 			memset(buf, 0, full_size);
@@ -241,7 +240,10 @@ static __init char *log_buf_alloc(unsigned long size, unsigned *dest_offset)
 		}
 		*dest_offset = new_logbits->_log_end;
 		new_logbits->_log_end = log_end;
-		new_logbits->_logged_chars += logged_chars;
+		if (new_logbits->_logged_chars + logged_chars <= size)
+			new_logbits->_logged_chars += logged_chars;
+		else
+			new_logbits->_logged_chars = size;
 		logbits = new_logbits;
 		return buf;
 	}
@@ -879,7 +881,6 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 			emit_log_char('<');
 			emit_log_char(current_log_level + '0');
 			emit_log_char('>');
-			printed_len += 3;
 			new_text_line = 0;
 
 			if (printk_time) {
@@ -897,7 +898,6 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 
 				for (tp = tbuf; tp < tbuf + tlen; tp++)
 					emit_log_char(*tp);
-				printed_len += tlen;
 			}
 
 			if (!*p)
