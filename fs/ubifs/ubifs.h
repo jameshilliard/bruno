@@ -1446,6 +1446,7 @@ struct ubifs_info {
 
 #ifdef CONFIG_UBIFS_FS_DEBUG
 	struct ubifs_debug_info *dbg;
+	wait_queue_head_t fs_event_wq;
 #endif
 };
 
