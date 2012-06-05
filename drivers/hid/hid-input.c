@@ -473,7 +473,11 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 		case 0x036: map_key_clear(BTN_MISC);		break;
 
 		case 0x040: map_key_clear(KEY_MENU);		break;
-		case 0x045: map_key_clear(KEY_RADIO);		break;
+		case 0x041: map_key_clear(KEY_OK);		break;
+		case 0x042: map_key_clear(KEY_UP);		break;
+		case 0x043: map_key_clear(KEY_DOWN);		break;
+		case 0x044: map_key_clear(KEY_LEFT);		break;
+		case 0x045: map_key_clear(KEY_RIGHT);		break;
 
 		case 0x083: map_key_clear(KEY_LAST);		break;
 		case 0x088: map_key_clear(KEY_PC);		break;
