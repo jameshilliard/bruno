@@ -200,6 +200,60 @@ static struct logbits *logbits = &__logbits;
 #define PERSIST_SEARCH_JUMP (16*1024*1024)
 #define PERSIST_MAGIC 0xbabb1e
 
+#ifdef CONFIG_BOOTLOG_COPY
+#define BOOTLOG_MAGIC (0x1090091e)
+struct bloghdr {
+	unsigned int magic; /* for kernel verification */
+	unsigned int offset; /* current log offset */
+};
+
+extern unsigned long bootlog_get_addr(void);
+extern unsigned long bootlog_get_size(void);
+
+static inline struct bloghdr *get_bootlog_hdr(void) {
+	unsigned long bootlog_size = bootlog_get_size();
+	if (bootlog_size) {
+		struct bloghdr *blog_hdr = (struct bloghdr *)
+				phys_to_virt(bootlog_get_addr());
+		if (BOOTLOG_MAGIC != blog_hdr->magic ||
+		    (blog_hdr->magic + sizeof(struct bloghdr) > bootlog_size)) {
+			printk(KERN_INFO "bootlog: header invalid m:0x%08x "
+			       "o:0x%08x\n", blog_hdr->magic, blog_hdr->offset);
+			return NULL;
+		}
+		return blog_hdr;
+	}
+	return NULL;
+}
+
+static inline unsigned copy_bootlog(struct bloghdr *blog_hdr,
+				    unsigned dest_offset)
+{
+	if (blog_hdr) {
+		unsigned idx = dest_offset;
+		char *blog_buf = (char *)(blog_hdr + 1);
+		unsigned i;
+
+		for (i = 0; i < blog_hdr->offset; ++i) {
+			LOG_BUF(idx) = blog_buf[i];
+			++idx;
+		}
+		if (logged_chars + blog_hdr->offset <= log_buf_len)
+			logged_chars += blog_hdr->offset;
+		else
+			logged_chars = log_buf_len;
+		dest_offset = idx;
+	}
+        return dest_offset;
+}
+
+static inline void free_bootlog(void)
+{
+	free_bootmem(bootlog_get_addr(), bootlog_get_size());
+}
+
+#endif
+
 /*
  * size is a power of 2 so that the printk offset mask will work.  We'll add
  * a bit more space to the end of the buffer for our extra data, but that
@@ -261,6 +315,9 @@ static int __init log_buf_len_setup(char *str)
 {
 	unsigned size = memparse(str, &str);
 	unsigned long flags;
+#ifdef CONFIG_BOOTLOG_COPY
+	struct bloghdr *blog_hdr = NULL;
+#endif
 
 	if (size)
 		size = roundup_pow_of_two(size);
@@ -274,10 +331,19 @@ static int __init log_buf_len_setup(char *str)
 			goto out;
 		}
 
+#ifdef CONFIG_BOOTLOG_COPY
+		/* Read out the blog_hdr before logbuf is locked in case print
+		 * is needed. */
+		blog_hdr = get_bootlog_hdr();
+#endif
+
 		spin_lock_irqsave(&logbuf_lock, flags);
 		log_buf_len = size;
 		log_buf = new_log_buf;
 
+#ifdef CONFIG_BOOTLOG_COPY
+		dest_offset = copy_bootlog(blog_hdr, dest_offset);
+#endif
 		offset = start = min(con_start, log_start);
 		dest_idx = dest_offset;
 		while (start != log_end) {
@@ -290,6 +356,10 @@ static int __init log_buf_len_setup(char *str)
 		con_start += dest_offset - offset;
 		log_end += dest_offset - offset;
 		spin_unlock_irqrestore(&logbuf_lock, flags);
+
+#ifdef CONFIG_BOOTLOG_COPY
+		free_bootlog();
+#endif
 
 		printk(KERN_NOTICE "log_buf_len: %d\n", log_buf_len);
 	}

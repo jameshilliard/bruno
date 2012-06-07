@@ -92,12 +92,12 @@ core_initcall(brcm_memc1_bmem);
 /*
  * Parses command line for bmem= options
  */
-static int __init bmem_setup(char *str)
+static struct bmem_region *bmem_add(char *str)
 {
 	unsigned long addr = 0, size;
 	unsigned long lower_mem_bytes;
 	char *orig_str = str;
-	struct bmem_region *i;
+	struct bmem_region *i, *j;
 
 	lower_mem_bytes = (brcm_dram0_size_mb > BRCM_MAX_LOWER_MB) ?
 		(BRCM_MAX_LOWER_MB << 20) : (brcm_dram0_size_mb << 20);
@@ -106,22 +106,23 @@ static int __init bmem_setup(char *str)
 	if (*str == '@')
 		addr = (unsigned long)memparse(str + 1, &str);
 
-	if ((size > 0x40000000) || (addr > 0x80000000)) {
+	if ((size > 0x40000000) || (addr >= 0x80000000) ||
+	    (size+addr >= 0x80000000)) {
 		printk(KERN_WARNING "bmem: argument '%s' "
 			"is out of range, ignoring\n", orig_str);
-		return 0;
+		return NULL;
 	}
 
 	if (size == 0) {
 		printk(KERN_INFO "bmem: disabling reserved memory\n");
 		bmem_disabled = 1;
-		return 0;
+		return NULL;
 	}
 
 	if ((addr & ~PAGE_MASK) || (size & ~PAGE_MASK)) {
 		printk(KERN_WARNING "bmem: ignoring invalid range '%s' "
 			"(is it missing an 'M' suffix?)\n", orig_str);
-		return 0;
+		return NULL;
 	}
 
 	if (addr == 0) {
@@ -133,7 +134,7 @@ static int __init bmem_setup(char *str)
 			printk(KERN_WARNING "bmem: '%s' is larger than "
 				"lower memory (%lu MB), ignoring\n",
 				orig_str, brcm_dram0_size_mb);
-			return 0;
+			return NULL;
 		}
 		addr = lower_mem_bytes - size;
 	}
@@ -141,26 +142,84 @@ static int __init bmem_setup(char *str)
 	if (n_bmem_regions == MAX_BMEM_REGIONS) {
 		printk(KERN_WARNING "bmem: too many regions, "
 			"ignoring extras\n");
-		return 0;
+		return NULL;
 	}
 
-	for (i = bmem_regions; i < bmem_regions + n_bmem_regions; i++) {
+	for (i = bmem_regions; i < bmem_regions + n_bmem_regions; ++i) {
 		if (addr < i->addr + i->size && addr + size > i->addr) {
 			printk(KERN_WARNING "bmem: %ld MB @ %ld MB "
 				"overlaps with existing region, "
 				"ignoring\n", size/1024/1024, addr/1024/1024);
-			return 0;
+			return NULL;
+		}
+		/* The current brcm_free_bootmem assumes the input in ascending
+		 * order if two mem regions are in the same range. Otherwise, it
+		 * may miss. Adding the following code for sorting though
+		 * complexity here is O(N^2). Since we usually only have 3
+		 * memory regions, I guess this can be forgiven.
+		 */
+		if (addr < i->addr) {
+			for (j = bmem_regions + n_bmem_regions; j > i; --j) {
+				*j = *(j-1);
+			}
+			break;
 		}
 	}
 
-	bmem_regions[n_bmem_regions].addr = addr;
-	bmem_regions[n_bmem_regions].size = size;
-	n_bmem_regions++;
+	i->addr = addr;
+	i->size = size;
+	++n_bmem_regions;
 
+	return i;
+}
+
+static int __init bmem_setup(char *str)
+{
+	bmem_add(str);
+        return 0;
+}
+early_param("bmem", bmem_setup);
+
+
+#ifdef CONFIG_BOOTLOG_COPY
+
+static struct bmem_region *bootlog_region = NULL;
+
+unsigned long bootlog_get_addr(void)
+{
+	if (bootlog_region) {
+		return bootlog_region->addr;
+	}
 	return 0;
 }
 
-early_param("bmem", bmem_setup);
+unsigned long bootlog_get_size(void)
+{
+	if (bootlog_region) {
+		return bootlog_region->size;
+	}
+	return 0;
+}
+
+static unsigned int bootlog_set = 0;
+
+static int __init bootlog_setup(char *str)
+{
+	if (bootlog_set) {
+		printk(KERN_WARNING "bootlog: bootlog already set,"
+		       " ignoring additional range '%s'\n", str);
+		return 0;
+	}
+
+	bootlog_region = bmem_add(str);
+	bootlog_set = 1;
+	return 0;
+}
+
+early_param("bootlog", bootlog_setup);
+
+#endif  /* CONFIG_BOOTLOG_COPY */
+
 
 /*
  * Returns index if the supplied range falls entirely within a bmem region
@@ -331,13 +390,15 @@ void __init brcm_free_bootmem(unsigned long addr, unsigned long size)
 		 */
 		if (r) {
 			if (addr == r->addr) {
-				printk(KERN_INFO "bmem: adding %lu MB "
-					"RESERVED region at %lu MB "
-					"(0x%08lx@0x%08lx)\n",
-					r->size >> 20, r->addr >> 20,
-					r->size, r->addr);
+				printk(KERN_INFO "%s: adding %lu MB "
+				       "RESERVED region at %lu MB "
+				       "(0x%08lx@0x%08lx)\n",
+				       r==bootlog_region?"bootlog":"bmem",
+				       r->size >> 20, r->addr >> 20,
+				       r->size, r->addr);
 				chunksize = r->size;
-				r->valid = 1;
+				if (r != bootlog_region)
+					r->valid = 1;
 				goto skip;
 			} else {
 				BUG_ON(addr > r->addr);
