@@ -32,6 +32,7 @@
 #include <linux/math64.h>
 #include <linux/uaccess.h>
 #include <linux/random.h>
+#include <linux/poll.h>
 #include "ubifs.h"
 
 #ifdef CONFIG_UBIFS_FS_DEBUG
@@ -2804,7 +2805,12 @@ static ssize_t dfs_file_read(struct file *file, char __user *u, size_t count,
 		val = d->chk_fs;
 	else if (dent == d->dfs_tst_rcvry)
 		val = d->tst_rcvry;
-	else
+	else if (dent == d->dfs_readonly)
+		val = c->ro_error;
+	else if (dent == d->dfs_fs_event) {
+		interruptible_sleep_on(&c->fs_event_wq);
+		val = 1;
+	} else
 		return -EINVAL;
 
 	return provide_user_output(val, u, count, ppos);
@@ -2893,10 +2899,31 @@ static ssize_t dfs_file_write(struct file *file, const char __user *u,
 	return count;
 }
 
+static unsigned int dfs_file_poll(struct file *file,
+                                  struct poll_table_struct *wait)
+{
+	struct ubifs_info *c = file->private_data;
+	struct ubifs_debug_info *d = c->dbg;
+	struct dentry *dent = file->f_path.dentry;
+	unsigned int mask = 0;
+
+	if (dent == d->dfs_fs_event) {
+		poll_wait(file, &c->fs_event_wq, wait);
+		if (c->ro_error) mask |= POLLIN | POLLRDNORM;
+	} else if (dent == d->dfs_readonly) {
+		mask |= POLLIN | POLLRDNORM;
+	} else {
+		mask |= POLLIN | POLLRDNORM;
+		mask |= POLLOUT | POLLWRNORM;
+	}
+	return mask;
+}
+
 static const struct file_operations dfs_fops = {
 	.open = dfs_file_open,
 	.read = dfs_file_read,
 	.write = dfs_file_write,
+	.poll = dfs_file_poll,
 	.owner = THIS_MODULE,
 	.llseek = no_llseek,
 };
@@ -2919,6 +2946,8 @@ int dbg_debugfs_init_fs(struct ubifs_info *c)
 	const char *fname;
 	struct dentry *dent;
 	struct ubifs_debug_info *d = c->dbg;
+
+	init_waitqueue_head(&c->fs_event_wq);
 
 	n = snprintf(d->dfs_dir_name, UBIFS_DFS_DIR_LEN + 1, UBIFS_DFS_DIR_NAME,
 		     c->vi.ubi_num, c->vi.vol_id);
@@ -2994,6 +3023,18 @@ int dbg_debugfs_init_fs(struct ubifs_info *c)
 	if (IS_ERR_OR_NULL(dent))
 		goto out_remove;
 	d->dfs_tst_rcvry = dent;
+
+	fname = "readonly";
+	dent = debugfs_create_file(fname, S_IRUSR, d->dfs_dir, c, &dfs_fops);
+	if (IS_ERR_OR_NULL(dent))
+		goto out_remove;
+	d->dfs_readonly = dent;
+
+	fname = "fs_event";
+	dent = debugfs_create_file(fname, S_IRUSR, d->dfs_dir, c, &dfs_fops);
+	if (IS_ERR_OR_NULL(dent))
+		goto out_remove;
+	d->dfs_fs_event = dent;
 
 	return 0;
 

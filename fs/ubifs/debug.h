@@ -81,6 +81,8 @@ typedef int (*dbg_znode_callback)(struct ubifs_info *c,
  * @dfs_chk_lprops: debugfs knob to enable UBIFS LEP properties extra checks
  * @dfs_chk_fs: debugfs knob to enable UBIFS contents extra checks
  * @dfs_tst_rcvry: debugfs knob to enable UBIFS recovery testing
+ * @dfs_readonly: debugfs file to get ro_error state
+ * @dfs_fs_event: debugfs file to be notified of events (ex: ro_error)
  */
 struct ubifs_debug_info {
 	struct ubifs_zbranch old_zroot;
@@ -124,6 +126,8 @@ struct ubifs_debug_info {
 	struct dentry *dfs_chk_lprops;
 	struct dentry *dfs_chk_fs;
 	struct dentry *dfs_tst_rcvry;
+	struct dentry *dfs_readonly;
+	struct dentry *dfs_fs_event;
 };
 
 /**
