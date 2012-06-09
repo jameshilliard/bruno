@@ -1154,8 +1154,18 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 		#define KSEGX(a) (((unsigned long)(a)) & 0xe0000000)
 		if (KSEGX(f) == KSEG2) {
 			unsigned int *p = (unsigned int *)(list);
-			printk(KERN_ERR "Bad RCU 0x%08x %08x %08x %08x %08x %08x %08x %08x\n",
+			printk(KERN_ERR "Bad RCU @0x%08x\n", p);
+			printk(KERN_ERR "Bad RCU %08x %08x %08x %08x %08x %08x %08x %08x\n",
 			       p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+			int i;
+			for (i = 0; i < 8; ++i) {
+				unsigned int *q = p[i];
+				if (KSEGX(q) == KSEG2) {
+					printk(KERN_ERR "Bad RCU* @0x%08x\n", q);
+					printk(KERN_ERR "Bad RCU* %08x %08x %08x %08x %08x %08x %08x %08x\n",
+					       q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]);
+				}
+			}
 		}
 
 		list->func(list);
