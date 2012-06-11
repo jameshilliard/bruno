@@ -50,6 +50,10 @@
 #include "suncore.h"
 #endif
 
+#ifdef CONFIG_BRUNO
+#include <asm/brcmstb/brcmstb.h>
+#endif  /* CONFIG_BRUNO */
+
 /*
  * Configuration:
  *   share_irqs - whether we pass IRQF_SHARED to request_irq().  This option
@@ -1430,6 +1434,11 @@ receive_chars(struct uart_8250_port *up, unsigned int *status)
 			if (lsr & UART_LSR_BI) {
 				lsr &= ~(UART_LSR_FE | UART_LSR_PE);
 				up->port.icount.brk++;
+#ifdef CONFIG_BRUNO
+				if (lock_console_in()) {
+					goto ignore_char;
+				}
+#endif  /* CONFIG_BRUNO */
 				/*
 				 * We do the SysRQ and SAK checking
 				 * here because otherwise the break
@@ -1458,6 +1467,11 @@ receive_chars(struct uart_8250_port *up, unsigned int *status)
 			else if (lsr & UART_LSR_FE)
 				flag = TTY_FRAME;
 		}
+#ifdef CONFIG_BRUNO
+		if (lock_console_in()) {
+			goto ignore_char;
+		}
+#endif  /* CONFIG_BRUNO */
 		if (uart_handle_sysrq_char(&up->port, ch))
 			goto ignore_char;
 

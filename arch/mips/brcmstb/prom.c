@@ -44,6 +44,7 @@
 #include <spaces.h>
 
 int cfe_splashmem_present = 0;
+int cfe_lock_console_in = 1;
 unsigned long brcm_dram0_size_mb;
 unsigned long brcm_dram1_size_mb;
 unsigned long brcm_dram1_linux_mb;
@@ -325,6 +326,12 @@ void prom_putchar(char x)
 	BDEV_WR(UART_REG(UART_TX), x);
 }
 
+#ifdef CONFIG_BRUNO
+int lock_console_in(void) {
+	return cfe_lock_console_in;
+}
+#endif  /* CONFIG_BRUNO */
+
 static void __init brcm_setup_early_printk(void)
 {
 	char *arg = strstr(arcs_cmdline, "console=");
@@ -336,6 +343,10 @@ static void __init brcm_setup_early_printk(void)
 #endif
 		0, 0,
 	};
+
+	if (strstr(arcs_cmdline, "login=") || strstr(arcs_cmdline, "debug=")) {
+		cfe_lock_console_in = 0;
+	}
 
 	/*
 	 * quick command line parse to pick the early printk console
