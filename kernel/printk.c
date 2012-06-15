@@ -210,15 +210,18 @@ struct bloghdr {
 extern unsigned long bootlog_get_addr(void);
 extern unsigned long bootlog_get_size(void);
 
-static inline struct bloghdr *get_bootlog_hdr(void) {
+static inline struct bloghdr *get_bootlog_hdr(void)
+{
 	unsigned long bootlog_size = bootlog_get_size();
 	if (bootlog_size) {
 		struct bloghdr *blog_hdr = (struct bloghdr *)
 				phys_to_virt(bootlog_get_addr());
 		if (BOOTLOG_MAGIC != blog_hdr->magic ||
-		    (blog_hdr->magic + sizeof(struct bloghdr) > bootlog_size)) {
+		    (blog_hdr->offset + sizeof(struct bloghdr) >
+                     bootlog_size)) {
 			printk(KERN_INFO "bootlog: header invalid m:0x%08x "
-			       "o:0x%08x\n", blog_hdr->magic, blog_hdr->offset);
+			       "o:0x%08x s:0x%08x\n", blog_hdr->magic,
+                               blog_hdr->offset, bootlog_size);
 			return NULL;
 		}
 		return blog_hdr;
