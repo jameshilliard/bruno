@@ -1171,6 +1171,7 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 							printk(KERN_ERR "Bad RCU** @0x%08x\n", r);
 							printk(KERN_ERR "Bad RCU** %08x %08x %08x %08x %08x %08x %08x %08x\n",
 							       r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
+						}
 					}
 				}
 			}
