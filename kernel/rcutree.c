@@ -1164,6 +1164,15 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 					printk(KERN_ERR "Bad RCU* @0x%08x\n", q);
 					printk(KERN_ERR "Bad RCU* %08x %08x %08x %08x %08x %08x %08x %08x\n",
 					       q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]);
+					int j;
+					for (j = 0; j < 8; ++j) {
+						unsigned int *r = q[j];
+						if (KSEGX(r) == KSEG2) {
+							printk(KERN_ERR "Bad RCU** @0x%08x\n", r);
+							printk(KERN_ERR "Bad RCU** %08x %08x %08x %08x %08x %08x %08x %08x\n",
+							       r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
+						}
+					}
 				}
 			}
 		}
