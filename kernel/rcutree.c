@@ -50,6 +50,9 @@
 
 #include "rcutree.h"
 
+#define KSEG2 0xc0000000
+#define KSEGX(a) (((unsigned long)(a)) & 0xe0000000)
+
 /* Data structures. */
 
 static struct lock_class_key rcu_node_class[NUM_RCU_LVLS];
@@ -1150,8 +1153,6 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 		debug_rcu_head_unqueue(list);
 
 		unsigned long f = (unsigned long)list->func;
-		#define KSEG2 0xc0000000
-		#define KSEGX(a) (((unsigned long)(a)) & 0xe0000000)
 		if (KSEGX(f) == KSEG2) {
 			unsigned int *p = (unsigned int *)(list);
 			printk(KERN_ERR "Bad RCU @0x%08x\n", p);
@@ -1454,6 +1455,11 @@ __call_rcu(struct rcu_head *head, void (*func)(struct rcu_head *rcu),
 {
 	unsigned long flags;
 	struct rcu_data *rdp;
+
+	if (KSEGX(func) == KSEG2) {
+		printk(KERN_ERR "call_rcu func=0x%08x\n", func);
+		dump_stack();
+	}
 
 	debug_rcu_head_queue(head);
 	head->func = func;
