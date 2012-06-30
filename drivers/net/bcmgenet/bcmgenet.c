@@ -40,6 +40,7 @@
 #include <linux/pm.h>
 #include <linux/clk.h>
 #include <linux/version.h>
+#include <linux/debugfs.h>
 
 #include <linux/mii.h>
 #include <linux/ethtool.h>
@@ -247,6 +248,24 @@ static int DmaDescThres = DMA_DESC_THRES;
 
 /* Descriptor queue budget. */
 static int desc_budget = DEFAULT_DESC_BUDGET;
+
+/* bcmgenet multi-queue budget count variables for debugfs*/
+static u32 bcmgenet_rx_mq_bd_cnt = GENET_RX_MQ_BD_CNT;
+static u32 bcmgenet_tx_mq_bd_cnt = GENET_MQ_BD_CNT;
+static u32 bcmgenet_tx_default_bd_cnt = GENET_DEFAULT_BD_CNT;
+static u32 bcmgenet_tx_mq_cnt = GENET_MQ_CNT;
+
+/* bcmgenet debugfs variable pointer and file name */
+typedef struct {
+	u32 *dbfs_p;
+	const char *dbfs_name;
+} bcmgenet_debugfs;
+
+/* Initialization function of bcmgenet debugfs variable pointer and file name*/
+#define BCMGENET_DEBUGFS(x) {.dbfs_p = &x, .dbfs_name = #x}
+
+static int bcmgenet_debugfs_create(void);
+static int bcmgenet_debugfs_create_u32(bcmgenet_debugfs bcmgenet_dbfs, int op, struct dentry *rtdir);
 
 #ifdef CONFIG_BCM7429A0
 static void bcm7429_ephy_workaround(struct BcmEnet_devctrl *pDevCtrl)
@@ -3852,6 +3871,61 @@ static const struct net_device_ops bcmgenet_netdev_ops = {
 	.ndo_set_mac_address = bcmgenet_set_mac_addr,
 	.ndo_do_ioctl = bcmgenet_ioctl,
 };
+
+/*
+ * This function creates debugfs directory and files for run-time debugging,
+ * including: bcmgenet multi-queue rx/tx budget size, multi-queue count, etc.
+ * Read-only for now.
+ */
+static int bcmgenet_debugfs_create(void)
+{
+	/* define debugfs file name and dentry */
+	const char *fname;
+	struct dentry *dfs_rootdir;
+	int err = -EIO, i;
+	/* init debugfs file name and variable*/
+	bcmgenet_debugfs dbfs[] = {
+					BCMGENET_DEBUGFS(bcmgenet_rx_mq_bd_cnt),
+					BCMGENET_DEBUGFS(bcmgenet_tx_mq_bd_cnt),
+					BCMGENET_DEBUGFS(bcmgenet_tx_default_bd_cnt),
+					BCMGENET_DEBUGFS(bcmgenet_tx_mq_cnt)
+	};
+
+	/* create debugfs directory */
+	fname = "bcmgenet";
+	dfs_rootdir = debugfs_create_dir(fname, NULL);
+	if (IS_ERR_OR_NULL(dfs_rootdir)) {
+		err = dfs_rootdir ? PTR_ERR(dfs_rootdir) : -ENODEV;
+		printk(KERN_ERR "%s: can't create debugfs directory\n", __func__);
+		return err;
+	}
+
+	/* create debugfs files */
+	for(i = 0; i < sizeof(dbfs)/sizeof(dbfs[0]); i++) {
+		err = bcmgenet_debugfs_create_u32(dbfs[i], S_IRUGO, dfs_rootdir);
+		if(err)
+			return err;
+	}
+
+	return 0;
+}
+
+/* This function creates debugfs file for u32 kernel variable. */
+static int bcmgenet_debugfs_create_u32(bcmgenet_debugfs bcmgenet_dbfs, int op, struct dentry *rtdir)
+{
+	struct dentry *dent;
+	int err = -EIO;
+
+	dent = debugfs_create_u32(bcmgenet_dbfs.dbfs_name, op, rtdir, bcmgenet_dbfs.dbfs_p);
+	if (IS_ERR_OR_NULL(dent)){
+		err = dent ? PTR_ERR(dent) : -ENODEV;
+		printk(KERN_ERR "%s: can't create debugfs file\n", __func__);
+		return err;
+	}
+
+	return 0;
+}
+
 static int bcmgenet_drv_probe(struct platform_device *pdev)
 {
 	struct resource *mres, *ires;
@@ -3864,6 +3938,10 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 	struct bcmemac_platform_data *cfg = pdev->dev.platform_data;
 	struct BcmEnet_devctrl *pDevCtrl;
 	struct net_device *dev;
+
+	/* create bebugfs for bcmgenet multi-queue*/
+	if (bcmgenet_debugfs_create())
+		printk(KERN_ERR "%s: debugfs creation fail.\n", __func__);
 
 	mres = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	ires = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
