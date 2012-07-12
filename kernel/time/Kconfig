@@ -27,3 +27,12 @@ config GENERIC_CLOCKEVENTS_BUILD
 	default y
 	depends on GENERIC_CLOCKEVENTS || GENERIC_CLOCKEVENTS_MIGR
 
+config AR_CLOCK
+	bool "Anti-Rollback Clock Support"
+	default n
+	help
+	  This option enables anti-rollback protection of the system
+	  clock. /proc/ar_clock stores the earliest time_t which the
+	  kernel will allow itself to be set to. /proc/ar_clock needs
+	  to be set only once, at boot. The kernel will continually
+	  advance it using the jiffies count.
