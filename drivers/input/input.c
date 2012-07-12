@@ -1851,6 +1851,8 @@ int input_register_device(struct input_dev *dev)
 	static atomic_t input_no = ATOMIC_INIT(0);
 	struct input_handler *handler;
 	const char *path;
+	static char bcm_bt_str[] = "Broadcom Bluetooth HID";
+	size_t bcm_bt_str_len = strlen(bcm_bt_str);
 	int error;
 
 	/* Every input device generates EV_SYN/SYN_REPORT events. */
@@ -1870,8 +1872,17 @@ int input_register_device(struct input_dev *dev)
 	if (!dev->rep[REP_DELAY] && !dev->rep[REP_PERIOD]) {
 		dev->timer.data = (long) dev;
 		dev->timer.function = input_repeat_key;
-		dev->rep[REP_DELAY] = 250;
-		dev->rep[REP_PERIOD] = 33;
+		/*
+		 * If this is a Broadcom Bluetooth device, set delay
+		 * to 400msec and allow up to 10 events per second.
+		 */
+		if (!strncmp(bcm_bt_str, dev->name, bcm_bt_str_len)) {
+			dev->rep[REP_DELAY] = 400;
+			dev->rep[REP_PERIOD] = 100;
+                } else {
+			dev->rep[REP_DELAY] = 250;
+			dev->rep[REP_PERIOD] = 33;
+		}
 	}
 
 	if (!dev->getkeycode && !dev->getkeycode_new)
