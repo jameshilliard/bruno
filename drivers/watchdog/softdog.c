@@ -51,7 +51,7 @@
 
 #define PFX "SoftDog: "
 
-#define TIMER_MARGIN	60		/* Default is 60 seconds */
+#define TIMER_MARGIN	70		/* Default, in seconds */
 static int soft_margin = TIMER_MARGIN;	/* in seconds */
 module_param(soft_margin, int, 0);
 MODULE_PARM_DESC(soft_margin,
