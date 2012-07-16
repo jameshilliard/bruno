@@ -63,9 +63,9 @@
 #error "This version of GENET doesn't support tx multi queue"
 #endif
 /* Default # of tx queues for multi queue support */
-#define GENET_MQ_CNT		4
+#define GENET_MQ_CNT		1
 /* Default # of bds for each queue for multi queue support */
-#define GENET_MQ_BD_CNT		32
+#define GENET_MQ_BD_CNT		192
 /* Default highest priority queue for multi queue support */
 #define GENET_Q0_PRIORITY	0
 
