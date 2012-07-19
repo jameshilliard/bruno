@@ -120,7 +120,6 @@ extern void read_boot_clock(struct timespec *ts);
 extern int update_persistent_clock(struct timespec now);
 extern int no_sync_cmos_clock __read_mostly;
 void timekeeping_init(void);
-extern void timekeeping_late_init(void);
 extern int timekeeping_suspended;
 
 unsigned long get_seconds(void);
