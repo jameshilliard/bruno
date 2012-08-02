@@ -56,6 +56,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/map.h>
+#include "partitionmap.h"
 
 /* Default SPI flash chip selects to scan at boot time
    Can be overriden with spics=N kernel boot argument
@@ -639,6 +640,7 @@ arch_initcall(platform_devices_setup);
 #define TYPE_SPI		3
 #define TYPE_MAX		TYPE_SPI
 
+static int nand_id = 0;
 static const char type_names[][8] = { "NONE", "NOR", "NAND", "SPI" };
 
 struct ebi_cs_info {
@@ -741,7 +743,7 @@ static int __init spics_setup(char *str)
 
 __setup("spics", spics_setup);
 
-static void __init brcm_setup_cs(int cs, int nr_parts,
+static void brcm_setup_cs(int cs, int nr_parts,
 	struct mtd_partition *parts)
 {
 	struct platform_device *pdev;
@@ -775,7 +777,6 @@ static void __init brcm_setup_cs(int cs, int nr_parts,
 	}
 	case TYPE_NAND: {
 		struct brcmnand_platform_data pdata;
-		static int nand_id;
 
 		pdata.chip_select = cs;
 		pdata.nr_parts = nr_parts;
@@ -786,6 +787,8 @@ static void __init brcm_setup_cs(int cs, int nr_parts,
 		    platform_device_add_data(pdev, &pdata, sizeof(pdata)) ||
 		    platform_device_add(pdev))
 			platform_device_put(pdev);
+                else
+			register_nand(pdev);
 		break;
 	}
 	case TYPE_SPI: {
@@ -826,96 +829,46 @@ static void __init brcm_setup_cs(int cs, int nr_parts,
 static int __initdata noflash;
 static int __initdata nandcs[NUM_CS];
 
-/***********************************************************************
- * Platform BRUNO GFHD100 specific setup
- ***********************************************************************/
-#ifdef CONFIG_BRUNO
-#ifdef CONFIG_BRUNO_GFHD100
-#define BRUNO_CFE_NAME         "cfe"
-#define BRUNO_HNVRAM_NAME      "hnvram"
-#define BRUNO_RESERVED0_NAME   "reserved0"
-#define BRUNO_RESERVED1_NAME   "reserved1"
-#define BRUNO_RESERVED2_NAME   "reserved2"
-#define BRUNO_RESERVED3_NAME   "reserved3"
-#define BRUNO_RESERVED4_NAME   "reserved4"
-#define BRUNO_DRMREGION0_NAME  "drmregion0"
-#define BRUNO_DRMREGION1_NAME  "drmregion1"
-#define BRUNO_NVRAM_NAME       "nvram"
-
-#define BRUNO_KERNEL0_NAME     "kernel0"
-#define BRUNO_KERNEL1_NAME     "kernel1"
-#define BRUNO_ROOTFS0_NAME     "rootfs0"
-#define BRUNO_ROOTFS1_NAME     "rootfs1"
-#define BRUNO_DATA_NAME        "data+ubi"
-#define BRUNO_MISC_NAME        "misc+ubi"
-
-#define BRUNO_CFE_SIZE         0x00200000UL
-#define BRUNO_HNVRAM_SIZE      0x00170000UL
-#define BRUNO_RESERVED0_SIZE   0x00010000UL
-#define BRUNO_RESERVED1_SIZE   0x00010000UL
-#define BRUNO_RESERVED2_SIZE   0x00010000UL
-#define BRUNO_RESERVED3_SIZE   0x00010000UL
-#define BRUNO_RESERVED4_SIZE   0x00010000UL
-#define BRUNO_DRMREGION0_SIZE  0x00010000UL
-#define BRUNO_DRMREGION1_SIZE  0x00010000UL
-#define BRUNO_NVRAM_SIZE       0x00020000UL
-
-#define BRUNO_KERNEL0_SIZE     0x10000000UL
-#define BRUNO_KERNEL1_SIZE     0x10000000UL
-#define BRUNO_ROOTFS0_SIZE     0x40000000UL
-#define BRUNO_ROOTFS1_SIZE     0x40000000UL
-#define BRUNO_DATA_SIZE        0x40000000UL
-#define BRUNO_MISC_SIZE        0x20000000UL
-
-#define BRUNO_CFE_OFFSET       0x00000000UL
-#define BRUNO_HNVRAM_OFFSET (BRUNO_CFE_OFFSET+BRUNO_CFE_SIZE)
-#define BRUNO_RESERVED0_OFFSET (BRUNO_HNVRAM_OFFSET+BRUNO_HNVRAM_SIZE)
-#define BRUNO_RESERVED1_OFFSET (BRUNO_RESERVED0_OFFSET+BRUNO_RESERVED0_SIZE)
-#define BRUNO_RESERVED2_OFFSET (BRUNO_RESERVED1_OFFSET+BRUNO_RESERVED1_SIZE)
-#define BRUNO_RESERVED3_OFFSET (BRUNO_RESERVED2_OFFSET+BRUNO_RESERVED2_SIZE)
-#define BRUNO_RESERVED4_OFFSET (BRUNO_RESERVED3_OFFSET+BRUNO_RESERVED3_SIZE)
-#define BRUNO_DRMREGION0_OFFSET (BRUNO_RESERVED4_OFFSET+BRUNO_RESERVED4_SIZE)
-#define BRUNO_DRMREGION1_OFFSET (BRUNO_DRMREGION0_OFFSET+BRUNO_DRMREGION0_SIZE)
-#define BRUNO_NVRAM_OFFSET (BRUNO_DRMREGION1_OFFSET+BRUNO_DRMREGION1_SIZE)
-
-#define BRUNO_KERNEL0_OFFSET   0x00000000UL
-#define BRUNO_KERNEL1_OFFSET   (BRUNO_KERNEL0_OFFSET+BRUNO_KERNEL0_SIZE)
-#define BRUNO_ROOTFS0_OFFSET   (BRUNO_KERNEL1_OFFSET+BRUNO_KERNEL1_SIZE)
-#define BRUNO_ROOTFS1_OFFSET   (BRUNO_ROOTFS0_OFFSET+BRUNO_ROOTFS0_SIZE)
-#define BRUNO_DATA_OFFSET      (BRUNO_ROOTFS1_OFFSET+BRUNO_ROOTFS1_SIZE)
-#define BRUNO_MISC_OFFSET      (BRUNO_DATA_OFFSET+BRUNO_DATA_SIZE)
-#endif /* CONFIG_BRUNO_GFHD100 */
-
-/* Partition map */
-static struct mtd_partition fixed_nor_partition_map[] =
-{
-  {   name: BRUNO_CFE_NAME, size: BRUNO_CFE_SIZE, offset: BRUNO_CFE_OFFSET },
-  {   name: BRUNO_HNVRAM_NAME, size: BRUNO_HNVRAM_SIZE, offset: BRUNO_HNVRAM_OFFSET },
-  {   name: BRUNO_RESERVED0_NAME, size: BRUNO_RESERVED0_SIZE, offset: BRUNO_RESERVED0_OFFSET },
-  {   name: BRUNO_RESERVED1_NAME, size: BRUNO_RESERVED1_SIZE, offset: BRUNO_RESERVED1_OFFSET },
-  {   name: BRUNO_RESERVED2_NAME, size: BRUNO_RESERVED2_SIZE, offset: BRUNO_RESERVED2_OFFSET },
-  {   name: BRUNO_RESERVED3_NAME, size: BRUNO_RESERVED3_SIZE, offset: BRUNO_RESERVED3_OFFSET },
-  {   name: BRUNO_RESERVED4_NAME, size: BRUNO_RESERVED4_SIZE, offset: BRUNO_RESERVED4_OFFSET },
-  {   name: BRUNO_DRMREGION0_NAME, size: BRUNO_DRMREGION0_SIZE, offset: BRUNO_DRMREGION0_OFFSET },
-  {   name: BRUNO_DRMREGION1_NAME, size: BRUNO_DRMREGION1_SIZE, offset: BRUNO_DRMREGION1_OFFSET },
-  {   name: BRUNO_NVRAM_NAME, size: BRUNO_NVRAM_SIZE, offset: BRUNO_NVRAM_OFFSET },
-};
-
-static struct mtd_partition fixed_nand_partition_map[] =
-{
-  {   name: BRUNO_KERNEL0_NAME, size: BRUNO_KERNEL0_SIZE, offset: BRUNO_KERNEL0_OFFSET },
-  {   name: BRUNO_KERNEL1_NAME, size: BRUNO_KERNEL1_SIZE, offset: BRUNO_KERNEL1_OFFSET },
-  {   name: BRUNO_ROOTFS0_NAME, size: BRUNO_ROOTFS0_SIZE, offset: BRUNO_ROOTFS0_OFFSET },
-  {   name: BRUNO_ROOTFS1_NAME, size: BRUNO_ROOTFS1_SIZE, offset: BRUNO_ROOTFS1_OFFSET },
-  {   name: BRUNO_DATA_NAME, size: BRUNO_DATA_SIZE, offset: BRUNO_DATA_OFFSET },
-  {   name: BRUNO_MISC_NAME, size: BRUNO_MISC_SIZE, offset: BRUNO_MISC_OFFSET }
-};
-#endif /* CONFIG_BRUNO */
-
-
 static struct map_info brcm_dummy_map = {
 	.name			= "DUMMY",
 };
+
+#ifdef CONFIG_BRUNO
+static void init_mtd(void) {
+	int i;
+	for (i = 0; i < ARRAY_SIZE(cs_info); i++) {
+		if (cs_info[i].type != TYPE_NONE) {
+			printk(KERN_INFO "EBI CS%d: setting up %s flash\n", i,
+			       type_names[cs_info[i].type]);
+			switch( cs_info[i].type )
+			{
+				case TYPE_SPI :
+					brcm_setup_cs(i, fixed_nor_partition_map_size,
+						      &fixed_nor_partition_map[0]);
+					break;
+				case TYPE_NAND :
+					brcm_setup_cs(i, fixed_nand_partition_map_size,
+						      &fixed_nand_partition_map[0]);
+					break;
+			}
+		}
+	}
+}
+
+void init_nand(void) {
+	int i;
+	nand_id = 0;
+	for (i = 0; i < ARRAY_SIZE(cs_info); i++) {
+		if (cs_info[i].type == TYPE_NAND) {
+			printk(KERN_INFO "EBI CS%d: setting up %s flash\n", i,
+			       type_names[cs_info[i].type]);
+			brcm_setup_cs(i, fixed_nand_partition_map_size,
+				      &fixed_nand_partition_map[0]);
+		}
+	}
+}
+EXPORT_SYMBOL(init_nand);
+#endif /* CONFIG_BRUNO */
 
 static int __init brcmstb_mtd_setup(void)
 {
@@ -1023,21 +976,7 @@ static int __init brcmstb_mtd_setup(void)
 	}
 
 #ifdef CONFIG_BRUNO
-	for (i = 0; i < NUM_CS; i++) {
-		if (cs_info[i].type != TYPE_NONE) {
-			printk(KERN_INFO "EBI CS%d: setting up %s flash\n", i,
-				   type_names[cs_info[i].type]);
-			switch( cs_info[i].type )
-			{
-				case TYPE_SPI :
-					brcm_setup_cs(i, ARRAY_SIZE(fixed_nor_partition_map), &fixed_nor_partition_map[0]);
-					break;
-				case TYPE_NAND :
-					brcm_setup_cs(i, ARRAY_SIZE(fixed_nand_partition_map), &fixed_nand_partition_map[0]);
-					break;
-			}
-		}
-	}
+	init_mtd();
 #else
 	/* set up primary first, so that it owns mtd0/mtd1/(mtd2) */
 	printk(KERN_INFO "EBI CS%d: setting up %s flash (primary)\n", primary,

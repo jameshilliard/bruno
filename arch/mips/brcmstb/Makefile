@@ -4,3 +4,5 @@ obj-$(CONFIG_PCI)	+= pci.o
 obj-$(CONFIG_SMP)	+= smp.o
 obj-$(CONFIG_BRCM_HAS_STANDBY)	+= standby.o
 obj-$(CONFIG_BRCM_HAS_AON) += s3_standby.o s3.o
+obj-$(CONFIG_BRUNO)		+= partitionmap.o
+obj-$(CONFIG_REPARTITION)	+= repartition.o
