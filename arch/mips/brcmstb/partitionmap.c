@@ -20,7 +20,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/slab.h>
-#include "partitionmap.h"
+#include <mtd/partitionmap.h>
 
 #define CFE_NAME         "cfe"
 #define HNVRAM_NAME      "hnvram"
@@ -131,12 +131,17 @@ static struct mtd_partition fixed_nand_partition_map_v2[] =
 /* By default, use partition map v2. */
 struct mtd_partition *fixed_nor_partition_map = fixed_nor_partition_map_v1;
 int fixed_nor_partition_map_size = ARRAY_SIZE(fixed_nor_partition_map_v1);
+EXPORT_SYMBOL(fixed_nor_partition_map_size);
 
 struct mtd_partition *fixed_nand_partition_map = fixed_nand_partition_map_v2;
 int fixed_nand_partition_map_size = ARRAY_SIZE(fixed_nand_partition_map_v2);
+EXPORT_SYMBOL(fixed_nand_partition_map_size);
 
 static DEFINE_MUTEX(partitionmap_mutex);
 static struct list_head mtd_dev_list = LIST_HEAD_INIT(mtd_dev_list);
+
+static DEFINE_MUTEX(bb_mutex);
+static struct list_head bb_list = LIST_HEAD_INIT(bb_list);
 
 int partitionmap_version = 2;	/* partition map version */
 EXPORT_SYMBOL(partitionmap_version);
@@ -146,21 +151,84 @@ struct mtd_dev_entry {
 	struct platform_device *pdev;
 };
 
+struct bb_entry {
+	struct list_head list;
+	loff_t offset;
+};
+
+size_t partitionmap_print_bbinfo(char *buffer, size_t size)
+{
+	size_t ret;
+	size_t pos = 0;
+	int i;
+	struct mtd_partition *mtd;
+	struct bb_entry *bb;
+	size_t *bb_map = kzalloc(fixed_nand_partition_map_size*sizeof(size_t),
+				 GFP_KERNEL);
+	if (!bb_map)
+		return 0;
+
+	ret = scnprintf(buffer + pos, size - pos, "partition: badblocks\n");
+	if (!ret) {
+		kfree(bb_map);
+		return 0;
+	}
+
+	pos += ret;
+
+	mutex_lock(&bb_mutex);
+	list_for_each_entry(bb, &bb_list, list) {
+		for (i= 0, mtd = &fixed_nand_partition_map[0];
+		     i < fixed_nand_partition_map_size; ++i, ++mtd) {
+			if ((bb->offset >= mtd->offset) &&
+			    (bb->offset < (mtd->offset + mtd->size))) {
+				++bb_map[i];
+			}
+		}
+	}
+	mutex_unlock(&bb_mutex);
+
+	for (i = 0, mtd = &fixed_nand_partition_map[0];
+	     i < fixed_nand_partition_map_size; ++i, ++mtd) {
+		if (pos < size) {
+			ret = (size_t) scnprintf(
+					buffer + pos, size - pos,
+					"%s: %u\n", mtd->name,
+					bb_map[i]);
+		} else {
+			ret = 0;
+		}
+		if (!ret) {
+			kfree(bb_map);
+			return ret;
+		}
+		pos += ret;
+	}
+
+	if (pos && buffer[pos - 1] == '\n') {
+		buffer[pos - 1] = '\0';
+	}
+
+	kfree(bb_map);
+
+	return pos;
+}
+EXPORT_SYMBOL(partitionmap_print_bbinfo);
+
 size_t partitionmap_print_info(char *buffer, size_t size)
 {
 	size_t ret;
-        size_t pos = 0;
+	size_t pos = 0;
 	struct mtd_dev_entry *mtd;
 
 	ret = scnprintf(buffer + pos, size - pos,
 			"Partition map version: %d\n",
-                        partitionmap_version);
+			partitionmap_version);
 	if (!ret)
 		return 0;
 
 	pos += ret;
 	mutex_lock(&partitionmap_mutex);
-
 	list_for_each_entry(mtd, &mtd_dev_list, list) {
 		if (pos < size) {
 			ret = (size_t)scnprintf(buffer + pos, size - pos,
@@ -175,8 +243,11 @@ size_t partitionmap_print_info(char *buffer, size_t size)
 		}
 		pos += ret;
 	}
-
 	mutex_unlock(&partitionmap_mutex);
+
+	if (pos && buffer[pos - 1] == '\n') {
+		buffer[pos - 1] = '\0';
+	}
 
 	return pos;
 }
@@ -210,11 +281,27 @@ int switch_partition(int pver) {
 			return 2;
 	}
 	pr_info("Switched partition from version %d to version %d.\n",
-                partitionmap_version, pver);
-        partitionmap_version = pver;
+		partitionmap_version, pver);
+	partitionmap_version = pver;
 	return 0;
 }
 EXPORT_SYMBOL(switch_partition);
+
+void register_badblock(loff_t offset)
+{
+	struct bb_entry* obj = (struct bb_entry *)
+			kmalloc(sizeof(struct bb_entry), GFP_KERNEL);
+
+	if (!obj)
+		panic("Insufficient memory to allocate MTD device entry\n");
+
+	obj->offset = offset;
+
+	mutex_lock(&bb_mutex);
+	list_add(&obj->list, &bb_list);
+	mutex_unlock(&bb_mutex);
+}
+EXPORT_SYMBOL(register_badblock);
 
 void register_nand(struct platform_device *pdev)
 {
@@ -252,7 +339,7 @@ EXPORT_SYMBOL(flush_nand);
 static int __init partitionver_setup(char *options)
 {
 	int pver;
-        char* endp;
+	char* endp;
 	if (*options == 0)
 		return 0;
 	pver = simple_strtol(options, &endp, 10);

@@ -19,15 +19,17 @@
 #include <linux/sysctl.h>
 #include <linux/proc_fs.h>
 #include <linux/init.h>
-#include "partitionmap.h"
+#include <mtd/partitionmap.h>
 #include "repartition.h"
 
 #define PARTITIONMAP_STR_SIZE 512
+#define BADBLOCK_STR_SIZE 512
 
 static const char repartition_proc_name[] = "repartition";
 
 static struct repartition_sysctl_setting {
 	char info[PARTITIONMAP_STR_SIZE];   /* partition map info */
+	char bbinfo[BADBLOCK_STR_SIZE];     /* bad block info */
 	int version;
 	int disable;
 	int disable_min;
@@ -49,15 +51,42 @@ static int repartition_print_info(void)
 	return 0;
 }
 
+static int repartition_print_bbinfo(void)
+{
+	int ret = partitionmap_print_bbinfo(setting.bbinfo, sizeof(setting.bbinfo));
+	if (!ret)
+		return 1;
+
+	return 0;
+}
+
 static void reinit_nand(void)
 {
 	flush_nand();
 	init_nand();
 }
 
+static int repartition_sysctl_bbinfo(ctl_table *ctl, int write,
+				     void __user *buffer, size_t *lenp,
+				     loff_t *ppos)
+{
+	if (!*lenp || (*ppos && !write)) {
+		*lenp = 0;
+		return 0;
+	}
+
+	if(repartition_print_bbinfo()) {
+		*lenp = 0;
+		pr_err("insufficient bad block info buffer\n");
+		return -ENOMEM;
+	}
+	proc_dostring(ctl, write, buffer, lenp, ppos);
+	return 0;
+}
+
 static int repartition_sysctl_info(ctl_table *ctl, int write,
-				    void __user *buffer, size_t *lenp,
-				    loff_t *ppos)
+				   void __user *buffer, size_t *lenp,
+				   loff_t *ppos)
 {
 	if (!*lenp || (*ppos && !write)) {
 		*lenp = 0;
@@ -70,7 +99,7 @@ static int repartition_sysctl_info(ctl_table *ctl, int write,
 		return -ENOMEM;
 	}
 	proc_dostring(ctl, write, buffer, lenp, ppos);
-        return 0;
+	return 0;
 }
 
 static int repartition_sysctl_version(ctl_table *ctl, int write,
@@ -108,6 +137,13 @@ static int repartition_sysctl_disable(ctl_table *ctl, int write,
 }
 
 static ctl_table repartition_data_table[] = {
+	{
+		.procname       = "bbinfo",
+		.data           = setting.bbinfo,
+		.maxlen         = BADBLOCK_STR_SIZE,
+		.mode           = 0444,
+		.proc_handler   = repartition_sysctl_bbinfo,
+	},
 	{
 		.procname       = "info",
 		.data           = setting.info,
@@ -170,7 +206,7 @@ static int __init repartition_init(void)
 static int __init partitionver_setup(char *options)
 {
 	int pver;
-        char* endp;
+	char* endp;
 	if (*options == 0)
 		return 0;
 	pver = simple_strtol(options, &endp, 10);
@@ -184,7 +220,7 @@ static int __exit repartition_exit(void)
 {
 	if (repartition_sysctl_header)
 		unregister_sysctl_table(repartition_sysctl_header);
-        return 0;
+	return 0;
 }
 module_exit(repartition_exit);
 #endif  /* MODULE */

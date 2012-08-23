@@ -19,9 +19,11 @@ extern int fixed_nor_partition_map_size;
 extern int fixed_nand_partition_map_size;
 extern struct mtd_partition *fixed_nor_partition_map;
 extern struct mtd_partition *fixed_nand_partition_map;
+extern size_t partitionmap_print_bbinfo(char *buffer, size_t size);
 extern size_t partitionmap_print_info(char *buffer, size_t size);
 extern int switch_partition(int pver);
 extern void register_nand(struct platform_device *pdev);
+extern void register_badblock(loff_t offset);
 extern void flush_nand(void);
 
 #endif  /* __PARTITIONMAP_H__ */
