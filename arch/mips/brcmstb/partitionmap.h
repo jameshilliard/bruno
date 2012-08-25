@@ -20,7 +20,6 @@ extern int fixed_nand_partition_map_size;
 extern struct mtd_partition fixed_nor_partition_map[];
 extern struct mtd_partition *fixed_nand_partition_map;
 
-extern int partitionmap_print_info(char *buffer, size_t size);
 extern int switch_partition(int pver);
 extern void register_nand(struct platform_device *pdev);
 extern void flush_nand(void);

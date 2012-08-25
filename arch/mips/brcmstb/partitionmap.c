@@ -145,27 +145,6 @@ struct mtd_dev_entry {
 	struct platform_device *pdev;
 };
 
-int partitionmap_print_info(char *buffer, size_t size)
-{
-	int pos = 0;
-	struct mtd_dev_entry *mtd;
-
-	pos += scnprintf(buffer + pos, size - pos,
-			"partitionver: %d\n", partitionmap_version);
-
-	pos += scnprintf(buffer + pos, size - pos, "devs: ");
-	mutex_lock(&partitionmap_mutex);
-	list_for_each_entry(mtd, &mtd_dev_list, list) {
-		pos += scnprintf(buffer + pos, size - pos,
-				"%s ",	dev_name(&mtd->pdev->dev));
-	}
-	mutex_unlock(&partitionmap_mutex);
-	pos += scnprintf(buffer + pos, size - pos, "\n");
-
-	return (pos < size - 1) ? 0 : -ENOMEM;
-}
-EXPORT_SYMBOL(partitionmap_print_info);
-
 int switch_partition(int pver) {
 	if (partitionmap_version == pver) {
 		return 1;
