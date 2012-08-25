@@ -21,6 +21,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include "partitionmap.h"
+#include "repartition.h"
 
 #define CFE_NAME         "cfe"
 #define HNVRAM_NAME      "hnvram"
@@ -91,8 +92,8 @@
 #define EMERGENCY_OFFSET_V2 (ROOTFS1_OFFSET_V2+ROOTFS1_SIZE_V2)
 #define DATA_OFFSET_V2      (EMERGENCY_OFFSET_V2+EMERGENCY_SIZE_V2)
 
-/* Partition map V1 */
-static struct mtd_partition fixed_nor_partition_map_v1[] =
+/* For NOR, we only support one partition map */
+struct mtd_partition fixed_nor_partition_map[] =
 {
 	{name: CFE_NAME, size: CFE_SIZE, offset: CFE_OFFSET},
 	{name: HNVRAM_NAME, size: HNVRAM_SIZE, offset: HNVRAM_OFFSET},
@@ -105,8 +106,10 @@ static struct mtd_partition fixed_nor_partition_map_v1[] =
 	{name: DRMREGION1_NAME, size: DRMREGION1_SIZE, offset: DRMREGION1_OFFSET},
 	{name: NVRAM_NAME, size: NVRAM_SIZE, offset: NVRAM_OFFSET }
 };
+int fixed_nor_partition_map_size = ARRAY_SIZE(fixed_nor_partition_map);
 
-static struct mtd_partition fixed_nand_partition_map_v1[] =
+/* Partition map V1 */
+static struct mtd_partition nand_v1[] =
 {
 	{name: KERNEL0_NAME, size: KERNEL0_SIZE_V1, offset: KERNEL0_OFFSET_V1},
 	{name: KERNEL1_NAME, size: KERNEL1_SIZE_V1, offset: KERNEL1_OFFSET_V1},
@@ -117,8 +120,7 @@ static struct mtd_partition fixed_nand_partition_map_v1[] =
 };
 
 /* Partition map V2 */
-#define fixed_nor_partition_map_v2 fixed_nor_partition_map_v1
-static struct mtd_partition fixed_nand_partition_map_v2[] =
+static struct mtd_partition nand_v2[] =
 {
 	{name: KERNEL0_NAME, size: KERNEL0_SIZE_V2, offset: KERNEL0_OFFSET_V2},
 	{name: KERNEL1_NAME, size: KERNEL1_SIZE_V2, offset: KERNEL1_OFFSET_V2},
@@ -128,17 +130,14 @@ static struct mtd_partition fixed_nand_partition_map_v2[] =
 	{name: DATA_NAME, size: DATA_SIZE_V2, offset: DATA_OFFSET_V2}
 };
 
-/* By default, use partition map v2. */
-struct mtd_partition *fixed_nor_partition_map = fixed_nor_partition_map_v1;
-int fixed_nor_partition_map_size = ARRAY_SIZE(fixed_nor_partition_map_v1);
-
-struct mtd_partition *fixed_nand_partition_map = fixed_nand_partition_map_v2;
-int fixed_nand_partition_map_size = ARRAY_SIZE(fixed_nand_partition_map_v2);
+/* No default values - must be autodetected based on chip type */
+struct mtd_partition *fixed_nand_partition_map;
+int fixed_nand_partition_map_size;
 
 static DEFINE_MUTEX(partitionmap_mutex);
 static struct list_head mtd_dev_list = LIST_HEAD_INIT(mtd_dev_list);
 
-int partitionmap_version = 2;	/* partition map version */
+int partitionmap_version;
 EXPORT_SYMBOL(partitionmap_version);
 
 struct mtd_dev_entry {
@@ -146,39 +145,24 @@ struct mtd_dev_entry {
 	struct platform_device *pdev;
 };
 
-size_t partitionmap_print_info(char *buffer, size_t size)
+int partitionmap_print_info(char *buffer, size_t size)
 {
-	size_t ret;
-        size_t pos = 0;
+	int pos = 0;
 	struct mtd_dev_entry *mtd;
 
-	ret = scnprintf(buffer + pos, size - pos,
-			"Partition map version: %d\n",
-                        partitionmap_version);
-	if (!ret)
-		return 0;
+	pos += scnprintf(buffer + pos, size - pos,
+			"partitionver: %d\n", partitionmap_version);
 
-	pos += ret;
+	pos += scnprintf(buffer + pos, size - pos, "devs: ");
 	mutex_lock(&partitionmap_mutex);
-
 	list_for_each_entry(mtd, &mtd_dev_list, list) {
-		if (pos < size) {
-			ret = (size_t)scnprintf(buffer + pos, size - pos,
-						"%s\n",
-						dev_name(&mtd->pdev->dev));
-		} else {
-			ret = 0;
-		}
-		if (!ret) {
-			mutex_unlock(&partitionmap_mutex);
-			return ret;
-		}
-		pos += ret;
+		pos += scnprintf(buffer + pos, size - pos,
+				"%s ",	dev_name(&mtd->pdev->dev));
 	}
-
 	mutex_unlock(&partitionmap_mutex);
+	pos += scnprintf(buffer + pos, size - pos, "\n");
 
-	return pos;
+	return (pos < size - 1) ? 0 : -ENOMEM;
 }
 EXPORT_SYMBOL(partitionmap_print_info);
 
@@ -189,20 +173,12 @@ int switch_partition(int pver) {
 
 	switch (pver) {
 		case 1:
-			fixed_nor_partition_map = fixed_nor_partition_map_v1;
-			fixed_nor_partition_map_size =
-					ARRAY_SIZE(fixed_nor_partition_map_v1);
-			fixed_nand_partition_map = fixed_nand_partition_map_v1;
-			fixed_nand_partition_map_size =
-					ARRAY_SIZE(fixed_nand_partition_map_v1);
+			fixed_nand_partition_map = nand_v1;
+			fixed_nand_partition_map_size = ARRAY_SIZE(nand_v1);
 			break;
 		case 2:
-			fixed_nor_partition_map = fixed_nor_partition_map_v2;
-			fixed_nor_partition_map_size =
-					ARRAY_SIZE(fixed_nor_partition_map_v2);
-			fixed_nand_partition_map = fixed_nand_partition_map_v2;
-			fixed_nand_partition_map_size =
-					ARRAY_SIZE(fixed_nand_partition_map_v2);
+			fixed_nand_partition_map = nand_v2;
+			fixed_nand_partition_map_size = ARRAY_SIZE(nand_v2);
 			break;
 		default:
 			/* Keep the default setting */
@@ -218,16 +194,17 @@ EXPORT_SYMBOL(switch_partition);
 
 void register_nand(struct platform_device *pdev)
 {
-	struct mtd_dev_entry* obj = (struct mtd_dev_entry *)
+	struct mtd_dev_entry *mtd = (struct mtd_dev_entry *)
 			kmalloc(sizeof(struct mtd_dev_entry), GFP_KERNEL);
 
-	if (!obj)
+	if (!mtd)
 		panic("Insufficient memory to allocate MTD device entry\n");
 
-	obj->pdev = pdev;
+	pr_info("register_nand: adding '%s'\n", dev_name(&pdev->dev));
+	mtd->pdev = pdev;
 
 	mutex_lock(&partitionmap_mutex);
-	list_add(&obj->list, &mtd_dev_list);
+	list_add(&mtd->list, &mtd_dev_list);
 	mutex_unlock(&partitionmap_mutex);
 }
 EXPORT_SYMBOL(register_nand);
@@ -239,7 +216,7 @@ void flush_nand(void)
 
 	mutex_lock(&partitionmap_mutex);
 	list_for_each_safe(pos, q, &mtd_dev_list){
-		mtd= list_entry(pos, struct mtd_dev_entry, list);
+		mtd = list_entry(pos, struct mtd_dev_entry, list);
 		pr_info("Remove mtd device '%s'.\n", dev_name(&mtd->pdev->dev));
 		platform_device_unregister(mtd->pdev);
 		list_del(pos);
@@ -252,7 +229,7 @@ EXPORT_SYMBOL(flush_nand);
 static int __init partitionver_setup(char *options)
 {
 	int pver;
-        char* endp;
+        char *endp;
 	if (*options == 0)
 		return 0;
 	pver = simple_strtol(options, &endp, 10);

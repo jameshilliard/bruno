@@ -1219,7 +1219,8 @@ static int __devinit brcmstb_nand_probe(struct platform_device *pdev)
 #ifdef CONFIG_MTD_PARTITIONS
 	int nr_parts;
 	struct mtd_partition *parts;
-	const char *part_probe_types[] = { "cmdlinepart", "RedBoot", NULL };
+	const char *part_probe_types[] = {
+		"cmdlinepart", "RedBoot", "brunopart", NULL };
 #endif
 
 	DBG("%s: id %d cs %d\n", __func__, pdev->id, pd->chip_select);

@@ -19,6 +19,8 @@
 #include <linux/sysctl.h>
 #include <linux/proc_fs.h>
 #include <linux/init.h>
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/partitions.h>
 #include "partitionmap.h"
 #include "repartition.h"
 
@@ -42,11 +44,7 @@ static struct ctl_table_header *repartition_sysctl_header;
 
 static int repartition_print_info(void)
 {
-	int ret = partitionmap_print_info(setting.info, sizeof(setting.info));
-	if (!ret)
-		return 1;
-
-	return 0;
+	return partitionmap_print_info(setting.info, sizeof(setting.info));
 }
 
 static void reinit_nand(void)
@@ -64,7 +62,7 @@ static int repartition_sysctl_info(ctl_table *ctl, int write,
 		return 0;
 	}
 
-	if(repartition_print_info()) {
+	if (repartition_print_info() != 0) {
 		*lenp = 0;
 		pr_err("insufficient info buffer\n");
 		return -ENOMEM;
@@ -154,6 +152,34 @@ static ctl_table repartition_root_table[] = {
 	{ }
 };
 
+static int mtd_parse(struct mtd_info *mtd,
+	struct mtd_partition **parts, unsigned long origin)
+{
+	/* TODO(apenwarr): use Redboot partition tables where available. */
+	if (!partitionmap_version) {
+		/* not set by partitionver */
+		if (mtd->size == (uint64_t)4096*1024*1024) {
+			/* default to v1 partition layout for 4GB flash */
+			switch_partition(1);
+		} else if (mtd->size == (uint64_t)1024*1024*1024) {
+			/* default to v2 partition layout for 1GB flash */
+			switch_partition(2);
+		}
+		/*
+		 * Anything else doesn't get any default partition tables,
+		 * because scribbling over the wrong areas of flash when
+		 * you don't know what's going on is unwise.
+		 */
+	}
+	*parts = fixed_nand_partition_map;
+	return fixed_nand_partition_map_size;
+}
+
+static struct mtd_part_parser mtdp = {
+	name: "brunopart",
+	parse_fn: mtd_parse,
+};
+
 static int __init repartition_init(void)
 {
 	static int initialized;
@@ -163,6 +189,7 @@ static int __init repartition_init(void)
 
 	repartition_sysctl_header =
 			register_sysctl_table(repartition_root_table);
+	register_mtd_parser(&mtdp);
 	initialized = 1;
 	return 0;
 }
@@ -170,7 +197,7 @@ static int __init repartition_init(void)
 static int __init partitionver_setup(char *options)
 {
 	int pver;
-        char* endp;
+        char *endp;
 	if (*options == 0)
 		return 0;
 	pver = simple_strtol(options, &endp, 10);
@@ -184,6 +211,7 @@ static int __exit repartition_exit(void)
 {
 	if (repartition_sysctl_header)
 		unregister_sysctl_table(repartition_sysctl_header);
+	unregister_mtd_parser(&mtdp);
         return 0;
 }
 module_exit(repartition_exit);
