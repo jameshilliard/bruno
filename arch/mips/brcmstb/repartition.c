@@ -21,19 +21,45 @@
 #include <linux/init.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
-#include "partitionmap.h"
+#include <mtd/partitionmap.h>
 #include "repartition.h"
 
 static int version;
 static int disable, disable_min = 0, disable_max = 1;
 static int nand_size_mb;
 
+#define BADBLOCK_STR_SIZE 512
+static char bbinfo[BADBLOCK_STR_SIZE];     /* bad block info */
+
 static struct ctl_table_header *repartition_sysctl_header;
+
+static int repartition_print_bbinfo(void)
+{
+	return partitionmap_print_bbinfo(bbinfo, sizeof(bbinfo));
+}
 
 static void reinit_nand(void)
 {
 	flush_nand();
 	init_nand();
+}
+
+static int repartition_sysctl_bbinfo(ctl_table *ctl, int write,
+				     void __user *buffer, size_t *lenp,
+				     loff_t *ppos)
+{
+	if (!*lenp || (*ppos && !write)) {
+		*lenp = 0;
+		return 0;
+	}
+
+	if (repartition_print_bbinfo() < 0) {
+		*lenp = 0;
+		pr_err("insufficient bad block info buffer\n");
+		return -ENOMEM;
+	}
+	proc_dostring(ctl, write, buffer, lenp, ppos);
+	return 0;
 }
 
 static int repartition_sysctl_version(ctl_table *ctl, int write,
@@ -71,6 +97,13 @@ static int repartition_sysctl_disable(ctl_table *ctl, int write,
 }
 
 static ctl_table repartition_data_table[] = {
+	{
+		.procname       = "bbinfo",
+		.data           = bbinfo,
+		.maxlen         = BADBLOCK_STR_SIZE,
+		.mode           = 0444,
+		.proc_handler   = repartition_sysctl_bbinfo,
+	},
 	{
 		.procname       = "disable",
 		.data           = &disable,

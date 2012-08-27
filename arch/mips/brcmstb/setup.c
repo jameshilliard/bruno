@@ -56,7 +56,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/map.h>
-#include "partitionmap.h"
+#include <mtd/partitionmap.h>
 
 /* Default SPI flash chip selects to scan at boot time
    Can be overriden with spics=N kernel boot argument

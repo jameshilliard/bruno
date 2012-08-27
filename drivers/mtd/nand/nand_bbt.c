@@ -67,6 +67,7 @@
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/vmalloc.h>
+#include <mtd/partitionmap.h>
 
 static int check_pattern_no_oob(uint8_t *buf, struct nand_bbt_descr *td)
 {
@@ -236,6 +237,9 @@ static int read_bbt(struct mtd_info *mtd, uint8_t *buf, int page, int num,
 				 */
 				pr_info("nand_read_bbt: bad block at 0x%012llx\n",
 					 (loff_t)((offs << 2) + (act >> 1)) << this->bbt_erase_shift);
+#ifdef CONFIG_BRUNO
+				register_badblock((loff_t)((offs << 2) + (act >> 1)) << this->bbt_erase_shift);
+#endif
 				/* Factory marked bad or worn out? */
 				if (tmp == 0)
 					this->bbt[offs + (act >> 3)] |= 0x3 << (act & 0x06);
