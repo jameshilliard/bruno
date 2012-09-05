@@ -132,6 +132,7 @@ static int paranoid_check_vid_hdr(const struct ubi_device *ubi, int pnum,
 int ubi_io_read(const struct ubi_device *ubi, void *buf, int pnum, int offset,
 		int len)
 {
+	static int errcount = 0;
 	int err, retries = 0;
 	size_t read;
 	loff_t addr;
@@ -196,9 +197,15 @@ retry:
 			goto retry;
 		}
 
-		ubi_err("error %d%s while reading %d bytes from PEB %d:%d, "
-			"read %zd bytes", err, errstr, len, pnum, offset, read);
-		ubi_dbg_dump_stack();
+		if (errcount < 100) {
+			ubi_err("error %d%s while reading %d bytes from PEB %d:%d, "
+				"read %zd bytes", err, errstr, len, pnum, offset, read);
+			if (errcount < 5)
+				ubi_dbg_dump_stack();
+			errcount++;
+			if (errcount == 100)
+				ubi_err("too many errors, not printing any more.");
+		}
 
 		/*
 		 * The driver should never return -EBADMSG if it failed to read

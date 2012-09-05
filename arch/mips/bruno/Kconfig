@@ -3,30 +3,6 @@ config BRUNO
 	default y
 	help
 	  This enables support for BRUNO platform.
-
-menu "Bruno options"
-	depends on BRUNO
-
-#####################################################################
-# User options: board selection
-#####################################################################
-
-choice
-	prompt "Board selection"
-	depends on BRUNO
-	help
-	  Select the Bruno board you are building for.
-
-config BRUNO_GFHD100
-	bool "GFHD100"
-	select BRUNO_PLATFORM_DEFAULTS
-
-endchoice
-
-endmenu
-
-config BRUNO_PLATFORM_DEFAULTS
-	bool
 	select BCMGENET_0_GPHY
 	select BRCM_OVERRIDE_USB
 	select BRCM_FORCE_USB_PWR_HI
@@ -53,5 +29,12 @@ config BRUNO_PLATFORM_DEFAULTS
 	select VIDEO_USB_DRIVERS
 	select VIDEO_V4L2
 	select VIDEO_V4L2_COMMON
+	select REPARTITION
 	# select ARCH_SUSPEND_POSSIBLE
 
+config REPARTITION
+	tristate "Repartition Support"
+	default y
+	depends on BRUNO
+	help
+	  This module enables support for repartition.

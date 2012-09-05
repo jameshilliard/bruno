@@ -585,6 +585,7 @@ static int attach_by_scanning(struct ubi_device *ubi)
 	int err;
 	struct ubi_scan_info *si;
 
+	ubi_msg("scanning.");
 	si = ubi_scan(ubi);
 	if (IS_ERR(si))
 		return PTR_ERR(si);
@@ -778,16 +779,16 @@ static int io_init(struct ubi_device *ubi)
 		ubi->ro_mode = 1;
 	}
 
-	ubi_msg("physical eraseblock size:   %d bytes (%d KiB)",
+	dbg_msg("physical eraseblock size:   %d bytes (%d KiB)",
 		ubi->peb_size, ubi->peb_size >> 10);
-	ubi_msg("logical eraseblock size:    %d bytes", ubi->leb_size);
-	ubi_msg("smallest flash I/O unit:    %d", ubi->min_io_size);
+	dbg_msg("logical eraseblock size:    %d bytes", ubi->leb_size);
+	dbg_msg("smallest flash I/O unit:    %d", ubi->min_io_size);
 	if (ubi->hdrs_min_io_size != ubi->min_io_size)
-		ubi_msg("sub-page size:              %d",
+		dbg_msg("sub-page size:              %d",
 			ubi->hdrs_min_io_size);
-	ubi_msg("VID header offset:          %d (aligned %d)",
+	dbg_msg("VID header offset:          %d (aligned %d)",
 		ubi->vid_hdr_offset, ubi->vid_hdr_aloffset);
-	ubi_msg("data offset:                %d", ubi->leb_start);
+	dbg_msg("data offset:                %d", ubi->leb_start);
 
 	/*
 	 * Note, ideally, we have to initialize ubi->bad_peb_count here. But
@@ -984,20 +985,20 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
 	ubi_msg("attached mtd%d to ubi%d", mtd->index, ubi_num);
 	ubi_msg("MTD device name:            \"%s\"", mtd->name);
 	ubi_msg("MTD device size:            %llu MiB", ubi->flash_size >> 20);
-	ubi_msg("number of good PEBs:        %d", ubi->good_peb_count);
-	ubi_msg("number of bad PEBs:         %d", ubi->bad_peb_count);
-	ubi_msg("number of corrupted PEBs:   %d", ubi->corr_peb_count);
-	ubi_msg("max. allowed volumes:       %d", ubi->vtbl_slots);
-	ubi_msg("wear-leveling threshold:    %d", CONFIG_MTD_UBI_WL_THRESHOLD);
-	ubi_msg("number of internal volumes: %d", UBI_INT_VOL_COUNT);
-	ubi_msg("number of user volumes:     %d",
+	dbg_msg("number of good PEBs:        %d", ubi->good_peb_count);
+	dbg_msg("number of bad PEBs:         %d", ubi->bad_peb_count);
+	dbg_msg("number of corrupted PEBs:   %d", ubi->corr_peb_count);
+	dbg_msg("max. allowed volumes:       %d", ubi->vtbl_slots);
+	dbg_msg("wear-leveling threshold:    %d", CONFIG_MTD_UBI_WL_THRESHOLD);
+	dbg_msg("number of internal volumes: %d", UBI_INT_VOL_COUNT);
+	dbg_msg("number of user volumes:     %d",
 		ubi->vol_count - UBI_INT_VOL_COUNT);
-	ubi_msg("available PEBs:             %d", ubi->avail_pebs);
-	ubi_msg("total number of reserved PEBs: %d", ubi->rsvd_pebs);
-	ubi_msg("number of PEBs reserved for bad PEB handling: %d",
+	dbg_msg("available PEBs:             %d", ubi->avail_pebs);
+	dbg_msg("total number of reserved PEBs: %d", ubi->rsvd_pebs);
+	dbg_msg("number of PEBs reserved for bad PEB handling: %d",
 		ubi->beb_rsvd_pebs);
-	ubi_msg("max/mean erase counter: %d/%d", ubi->max_ec, ubi->mean_ec);
-	ubi_msg("image sequence number:  %d", ubi->image_seq);
+	dbg_msg("max/mean erase counter: %d/%d", ubi->max_ec, ubi->mean_ec);
+	dbg_msg("image sequence number:  %d", ubi->image_seq);
 
 	/*
 	 * The below lock makes sure we do not race with 'ubi_thread()' which

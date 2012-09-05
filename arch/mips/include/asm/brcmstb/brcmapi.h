@@ -103,6 +103,8 @@ extern spinlock_t brcm_magnum_spinlock;
 
 void brcm_set_nmi_handler(void (*fn)(struct pt_regs *));
 
+int lock_console_in(void);
+
 /***********************************************************************
  * New exports of standard kernel symbols
  ***********************************************************************/

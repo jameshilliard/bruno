@@ -21,6 +21,11 @@
 #include <linux/tick.h>
 #include <linux/stop_machine.h>
 
+#ifdef CONFIG_AR_CLOCK
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#endif
+
 /* Structure holding internal timekeeping values. */
 struct timekeeper {
 	/* Current clocksource used for timekeeping. */
@@ -48,6 +53,61 @@ struct timekeeper {
 };
 
 struct timekeeper timekeeper;
+
+#ifdef CONFIG_AR_CLOCK
+long anti_rollback_time = 0;
+u64 anti_rollback_jiffies = 0;
+
+static long get_antirollback_clock(void)
+{
+	if (anti_rollback_time == 0) return 0;
+
+	return anti_rollback_time +
+	    ((get_jiffies_64() - anti_rollback_jiffies) / HZ);
+}
+
+static int ar_clock_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%lu\n", get_antirollback_clock());
+	return 0;
+}
+
+static ssize_t ar_clock_write(struct file *file, const char __user *buf,
+	size_t count, loff_t *offs)
+{
+	char kbuf[32];
+	long t;
+
+	if (*offs || count > sizeof(kbuf))
+		return -EINVAL;
+
+	if (copy_from_user(kbuf, buf, count))
+		return -EFAULT;
+
+	if (sscanf(kbuf, "%lu", &t) == 1) {
+		anti_rollback_time = t;
+		anti_rollback_jiffies = get_jiffies_64();
+	} else {
+		kbuf[sizeof(kbuf)-1] = '\0';
+		printk(KERN_WARNING "unable to parse ar_clock: %s", kbuf);
+	}
+
+	return count;
+}
+
+static int ar_clock_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, ar_clock_show, NULL);
+}
+
+static const struct file_operations ar_clock_fops = {
+	.open		= ar_clock_open,
+	.read		= seq_read,
+	.write		= ar_clock_write,
+	.release	= single_release,
+};
+#endif
+
 
 /**
  * timekeeper_setup_internals - Set up internals to use clocksource clock.
@@ -311,6 +371,17 @@ int do_settimeofday(struct timespec *tv)
 	struct timespec ts_delta;
 	unsigned long flags;
 
+#ifdef CONFIG_AR_CLOCK
+	/* No more than MAX_DELTA seconds before /proc/ar_clock */
+	#define MAX_DELTA       (30*60)
+	long ar_clock = get_antirollback_clock();
+	if (ar_clock != 0 && tv->tv_sec < (ar_clock - MAX_DELTA)) {
+		printk(KERN_ERR "rejecting settimeofday %lu < antirollback %lu",
+			tv->tv_sec, ar_clock);
+		return -E2BIG;
+	}
+#endif
+
 	if ((unsigned long)tv->tv_nsec >= NSEC_PER_SEC)
 		return -EINVAL;
 
@@ -507,6 +578,14 @@ void __init timekeeping_init(void)
 	total_sleep_time.tv_sec = 0;
 	total_sleep_time.tv_nsec = 0;
 	write_sequnlock_irqrestore(&xtime_lock, flags);
+}
+
+void __init timekeeping_late_init(void)
+{
+#ifdef CONFIG_AR_CLOCK
+	if (proc_create("ar_clock", 0644, NULL, &ar_clock_fops) == NULL)
+		printk(KERN_ERR "timekeeping_late_init proc_create failed");
+#endif
 }
 
 /* time in seconds when suspend began */

@@ -66,7 +66,7 @@
 /* Default # of tx queues for multi queue support */
 #define GENET_MQ_CNT		1
 /* Default # of bds for each queue for multi queue support */
-#define GENET_MQ_BD_CNT		192
+#define GENET_MQ_BD_CNT		128
 /* Default highest priority queue for multi queue support */
 #define GENET_Q0_PRIORITY	0
 
@@ -74,7 +74,7 @@
 	(TOTAL_DESC - GENET_MQ_CNT * GENET_MQ_BD_CNT)
 
 /* Default # of bds for each priority rx queue for multi queue support. */
-#define	GENET_RX_MQ_BD_CNT		192
+#define	GENET_RX_MQ_BD_CNT		128
 
 static void bcmgenet_init_multiq(struct net_device *dev);
 static void bcmgenet_init_multiq_rx(struct net_device *dev);
