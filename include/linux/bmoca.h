@@ -132,7 +132,7 @@ struct moca_platform_data {
 	u32			macaddr_hi;
 	u32			macaddr_lo;
 
-	phys_t			bcm3450_i2c_base;
+	phys_addr_t	bcm3450_i2c_base;
 	int			bcm3450_i2c_addr;
 
 	u32			hw_rev;  /* this is the chip_id */
