@@ -50,9 +50,6 @@
 
 #include "rcutree.h"
 
-#define KSEG2 0xc0000000
-#define KSEGX(a) (((unsigned long)(a)) & 0xe0000000)
-
 /* Data structures. */
 
 static struct lock_class_key rcu_node_class[NUM_RCU_LVLS];
@@ -1151,33 +1148,6 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 		next = list->next;
 		prefetch(next);
 		debug_rcu_head_unqueue(list);
-
-		unsigned long f = (unsigned long)list->func;
-		if (KSEGX(f) == KSEG2) {
-			unsigned int *p = (unsigned int *)(list);
-			printk(KERN_ERR "Bad RCU @0x%08x\n", p);
-			printk(KERN_ERR "Bad RCU %08x %08x %08x %08x %08x %08x %08x %08x\n",
-			       p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
-			int i;
-			for (i = 0; i < 8; ++i) {
-				unsigned int *q = p[i];
-				if (KSEGX(q) == KSEG2) {
-					printk(KERN_ERR "Bad RCU* @0x%08x\n", q);
-					printk(KERN_ERR "Bad RCU* %08x %08x %08x %08x %08x %08x %08x %08x\n",
-					       q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]);
-					int j;
-					for (j = 0; j < 8; ++j) {
-						unsigned int *r = q[j];
-						if (KSEGX(r) == KSEG2) {
-							printk(KERN_ERR "Bad RCU** @0x%08x\n", r);
-							printk(KERN_ERR "Bad RCU** %08x %08x %08x %08x %08x %08x %08x %08x\n",
-							       r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
-						}
-					}
-				}
-			}
-		}
-
 		list->func(list);
 		list = next;
 		if (++count >= rdp->blimit)
@@ -1455,11 +1425,6 @@ __call_rcu(struct rcu_head *head, void (*func)(struct rcu_head *rcu),
 {
 	unsigned long flags;
 	struct rcu_data *rdp;
-
-	if (KSEGX(func) == KSEG2) {
-		printk(KERN_ERR "call_rcu func=0x%08x\n", func);
-		dump_stack();
-	}
 
 	debug_rcu_head_queue(head);
 	head->func = func;
