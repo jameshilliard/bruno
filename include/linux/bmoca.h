@@ -45,6 +45,9 @@
 #define MOCA_IOCTL_WOL		_IOW(MOCA_IOC_MAGIC, 6, int)
 #define MOCA_IOCTL_GET_DRV_INFO	_IOR(MOCA_IOC_MAGIC, 0, struct moca_kdrv_info)
 
+#define MOCA_IOCTL_SET_CPU_RATE	_IOR(MOCA_IOC_MAGIC, 7, unsigned int)
+#define MOCA_IOCTL_SET_PHY_RATE	_IOR(MOCA_IOC_MAGIC, 8, unsigned int)
+
 /* this must match MoCAOS_IFNAMSIZE */
 #define MOCA_IFNAMSIZ		16
 
@@ -132,7 +135,7 @@ struct moca_platform_data {
 	u32			macaddr_hi;
 	u32			macaddr_lo;
 
-	phys_addr_t	bcm3450_i2c_base;
+	phys_addr_t		bcm3450_i2c_base;
 	int			bcm3450_i2c_addr;
 
 	u32			hw_rev;  /* this is the chip_id */
