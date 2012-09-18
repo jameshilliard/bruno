@@ -93,7 +93,7 @@ struct BcmEnet_devctrl {
 	/* transmit variables */
 	volatile struct tDmaRegs *txDma;/* location of tx Dma register */
 	volatile struct DmaDesc *txBds;	/* location of tx Dma BD ring */
-	struct Enet_CB *txCbs;	/* locaation of tx control block pool */
+	struct Enet_CB *txCbs;	/* location of tx control block pool */
 	int	nrTxBds;		/* number of transmit bds */
 	int	txFreeBds;		/* # of free transmit bds */
 	int	txLastCIndex;	/* consumer index for the last xmit call */
@@ -119,9 +119,9 @@ struct BcmEnet_devctrl {
 	unsigned char *rxRingStart[GENET_RX_RING_COUNT];	/* ring buffer start addr.*/
 
 	/* other misc variables */
-	int irq0;	/* regular IRQ */
+	int     irq0;	/* regular IRQ */
 	int	irq1;	/* ring buf IRQ */
-	int phyAddr;
+	int     phyAddr;
 	int	phyType;
 	int	bIPHdrOptimize;
 	unsigned int irq0_stat;	/* sw copy of irq0 status, for IRQ BH */

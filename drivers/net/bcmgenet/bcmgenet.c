@@ -375,7 +375,7 @@ int bcmemac_xmit_check(struct net_device *dev)
 	*/
 	spin_lock_irqsave(&pDevCtrl->lock, flags);
 	/* Compute how many buffers are transmited since last xmit call */
-	c_index = pDevCtrl->txDma->tDmaRings[16].tdma_consumer_index;
+	c_index = pDevCtrl->txDma->tDmaRings[GENET_TX_RING_COUNT].tdma_consumer_index;
 	c_index &= (TOTAL_DESC - 1);
 
 	if (c_index >= pDevCtrl->txLastCIndex)
@@ -435,7 +435,7 @@ int bcmemac_xmit_fragment(int ch, unsigned char *buf, int buf_len,
 	/*
 	 * We must don't have 64B status block enabled in this case!
 	 */
-	write_ptr = pDevCtrl->txDma->tDmaRings[16].tdma_write_pointer;
+	write_ptr = pDevCtrl->txDma->tDmaRings[GENET_TX_RING_COUNT].tdma_write_pointer;
 	write_ptr = ((write_ptr & DMA_RW_POINTER_MASK) >> 1);
 
 	/* Obtain transmit control block */
@@ -449,7 +449,7 @@ int bcmemac_xmit_fragment(int ch, unsigned char *buf, int buf_len,
 	 * Set addr and length of DMA BD to be transmitted.
 	 */
 	txCBPtr->BdAddr->address = txCBPtr->dma_addr;
-	txCBPtr->BdAddr->length_status = ((unsigned long)(buf_len))<<16;
+	txCBPtr->BdAddr->length_status = ((unsigned long)(buf_len)) << 16;
 	txCBPtr->BdAddr->length_status |= tx_flags | DMA_TX_APPEND_CRC;
 
 	/* Default QTAG for MoCA */
@@ -1119,6 +1119,7 @@ static struct Enet_CB *bcmgenet_get_txcb(struct net_device *dev,
 {
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	struct Enet_CB *txCBPtr = NULL;
+
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
 	if (index == DESC_INDEX) {
 		txCBPtr = pDevCtrl->txCbs;
@@ -1150,6 +1151,7 @@ static struct Enet_CB *bcmgenet_get_txcb(struct net_device *dev,
 
 	return txCBPtr;
 }
+
 /* --------------------------------------------------------------------------
 Name: bcmgenet_tx_reclaim
 Purpose: reclaim xmited skb
@@ -1231,7 +1233,7 @@ static void bcmgenet_tx_reclaim(struct net_device *dev, int index)
 			netif_wake_subqueue(dev, 0);
 		}
 		pDevCtrl->txLastCIndex = c_index;
-	} else{
+	} else {
 		if (pDevCtrl->txRingFreeBds[index] > (MAX_SKB_FRAGS + 1)
 			&& __netif_subqueue_stopped(dev, index+1)) {
 			pDevCtrl->intrl2_1->cpu_mask_set = (1 << index);
@@ -2123,6 +2125,7 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 	struct BcmEnet_devctrl *pDevCtrl = dev_id;
 	volatile struct intrl2Regs *intrl2 = pDevCtrl->intrl2_1;
 	unsigned int index;
+	unsigned long flags;
 
 	/* Save irq status for bottom-half processing. */
 	pDevCtrl->irq1_stat = intrl2->cpu_stat & ~intrl2->cpu_mask_status;
@@ -2136,8 +2139,9 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 	 */
 	if (pDevCtrl->irq1_stat & 0x0000ffff) {
 		index = 0;
-		for (index = 0; index < 16; index++) {
-			if (pDevCtrl->irq1_stat & (1<<index)) {
+                spin_lock_irqsave(&pDevCtrl->lock, flags);
+		for (index = 0; index < GENET_TX_RING_COUNT; index++) {
+			if (pDevCtrl->irq1_stat & (1 << index)) {
 				bcmgenet_tx_reclaim(pDevCtrl->dev, index);
 				if (index >= GENET_TX_MQ_CNT) {
 					pr_warn_ratelimited("bcmgenet_isr1 TX index %d >= %d",
@@ -2145,6 +2149,7 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 				}
 			}
 		}
+                spin_lock_irqrestore(&pDevCtrl->lock, flags);
 	}
 
 	if (pDevCtrl->irq1_stat & 0xffff0000) {
