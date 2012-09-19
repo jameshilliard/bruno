@@ -92,6 +92,7 @@ static void bcmgenet_init_multiq_rx(struct net_device *dev);
 
 /* Total number or priority descriptors must be less than TOTAL_DESC */
 #define	GENET_RX_TOTAL_MQ_BD	(GENET_RX_MQ_CNT * GENET_RX_MQ_BD_CNT)
+#define	GENET_TX_TOTAL_MQ_BD	(GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT)
 
 #if GENET_RX_TOTAL_MQ_BD > TOTAL_DESC
 #error Total number or rx priority descriptors must be less than TOTAL_DESC.
@@ -102,8 +103,7 @@ static void bcmgenet_init_multiq_rx(struct net_device *dev);
 #if GENET_TX_TOTAL_MQ_BD > TOTAL_DESC
 #error Total number or tx priority descriptors must be less than TOTAL_DESC.
 #else
-#define GENET_TX_DEFAULT_BD_CNT	\
-	(TOTAL_DESC - GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT)
+#define GENET_TX_DEFAULT_BD_CNT	(TOTAL_DESC - GENET_TX_TOTAL_MQ_BD)
 #endif
 
 #define RX_BUF_LENGTH		2048
@@ -2139,7 +2139,7 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 	 */
 	if (pDevCtrl->irq1_stat & 0x0000ffff) {
 		index = 0;
-                spin_lock_irqsave(&pDevCtrl->lock, flags);
+		spin_lock_irqsave(&pDevCtrl->lock, flags);
 		for (index = 0; index < GENET_TX_RING_COUNT; index++) {
 			if (pDevCtrl->irq1_stat & (1 << index)) {
 				bcmgenet_tx_reclaim(pDevCtrl->dev, index);
@@ -2149,7 +2149,7 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 				}
 			}
 		}
-                spin_lock_irqrestore(&pDevCtrl->lock, flags);
+		spin_unlock_irqrestore(&pDevCtrl->lock, flags);
 	}
 
 	if (pDevCtrl->irq1_stat & 0xffff0000) {
