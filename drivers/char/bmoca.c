@@ -185,12 +185,15 @@ struct moca_priv_data {
 	int			running;
 	int			wol_enabled;
 	struct clk		*clk;
+	struct clk		*phy_clk;
+	struct clk		*cpu_clk;
 
 	int			refcount;
 	unsigned long		start_time;
 	dma_addr_t		tpcapBufPhys;
 
 	unsigned int		continuous_power_tx_mode;
+	unsigned int		phy_freq;
 
 	unsigned int		hw_rev;
 
@@ -1538,6 +1541,13 @@ static int moca_ioctl_writemem(struct moca_priv_data *priv,
 	return 0;
 }
 
+#ifndef DSL_MOCA
+static int moca_get_phy_freq(struct moca_priv_data *priv)
+{
+	return (priv->phy_freq);
+}
+#endif
+
 /* legacy ioctl - DEPRECATED */
 static int moca_ioctl_get_drv_info_v2(struct moca_priv_data *priv,
 	unsigned long arg)
@@ -1593,9 +1603,10 @@ static int moca_ioctl_get_drv_info(struct moca_priv_data *priv,
 		info.gp1 = priv->running ?
 			MOCA_RD(priv->base + priv->gp1_offset) : 0;
 
+	info.phy_freq = moca_get_phy_freq(priv);
+
 #ifdef DSL_MOCA
-		info.phy_freq = moca_get_phy_freq(priv);
-		info.cpu_freq = moca_get_cpu_freq(priv);
+	info.cpu_freq = moca_get_cpu_freq(priv);
 #endif
 
 	memcpy(info.enet_name, pd->enet_name, MOCA_IFNAMSIZ);
@@ -1749,6 +1760,26 @@ static long moca_file_ioctl(struct file *file, unsigned int cmd,
 		dev_info(priv->dev, "WOL is %s\n",
 			priv->wol_enabled ? "enabled" : "disabled");
 		ret = 0;
+		break;
+	case MOCA_IOCTL_SET_CPU_RATE:
+		if (!priv->cpu_clk)
+			ret = -EIO;
+		else
+		{
+			clk_set_rate(priv->cpu_clk, (unsigned int)arg);
+			ret = 0;
+		}
+		break;
+	case MOCA_IOCTL_SET_PHY_RATE:
+		if (!priv->phy_clk)
+			ret = -EIO;
+		else
+		{
+			printk("Setting MOCA PHY CLK to %d\n", arg);
+
+			clk_set_rate(priv->phy_clk, (unsigned int)arg);
+			ret = 0;
+		}
 		break;
 	}
 	mutex_unlock(&priv->dev_mutex);
@@ -2007,6 +2038,8 @@ static int moca_probe(struct platform_device *pdev)
 	priv->start_time = jiffies;
 
 	priv->clk = clk_get(&pdev->dev, "moca");
+	priv->cpu_clk = clk_get(&pdev->dev, "moca-cpu");
+	priv->phy_clk = clk_get(&pdev->dev, "moca-phy");
 
 	priv->hw_rev = pd->hw_rev;
 
@@ -2143,6 +2176,13 @@ static int moca_probe(struct platform_device *pdev)
 	}
 #endif
 
+#if defined(CONFIG_BCM7425B0) || defined(CONFIG_BCM7435A0) 
+	BDEV_WR_F_RB(CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_1, MDIV_CH1, 10); 
+	priv->phy_freq = 360;
+#else
+	priv->phy_freq = 300;
+#endif
+
 	init_waitqueue_head(&priv->host_msg_wq);
 	init_waitqueue_head(&priv->core_msg_wq);
 	init_completion(&priv->copy_complete);
@@ -2251,47 +2291,12 @@ static int moca_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM
 static int moca_suspend(struct device *dev)
 {
-	struct moca_priv_data *priv = dev_get_drvdata(dev);
-
-	/* make sure all pending work is complete */
-	priv->running = 0;
-	disable_irq(priv->irq);
-	cancel_work_sync(&priv->work);
-
-	/* full reset */
-	mutex_lock(&priv->dev_mutex);
-	if (!priv->wol_enabled) {
-		moca_msg_reset(priv);
-		moca_3450_init(priv, MOCA_DISABLE);
-		moca_hw_init(priv, MOCA_DISABLE);
-	}
-	if (priv->enabled)
-		clk_disable(priv->clk);
-	/* Do not clear *enabled* flag, resume code will use it to decide
-		if clock needs to be restarted */
-	mutex_unlock(&priv->dev_mutex);
-
+	/* do not do anything on suspend.  MoCA core is not necessarily stopped */
 	return 0;
 }
 
 static int moca_resume(struct device *dev)
 {
-	struct moca_priv_data *priv = dev_get_drvdata(dev);
-	/* We assume moca daemon will reload the firmware
-	 * when it realizes the h/w has been reset
-	 */
-	mutex_lock(&priv->dev_mutex);
-	if (priv->enabled) {
-		clk_enable(priv->clk);
-
-		if (priv->wol_enabled) {
-			moca_msg_reset(priv);
-			moca_3450_init(priv, MOCA_DISABLE);
-			moca_hw_init(priv, MOCA_DISABLE);
-		}
-	}
-	enable_irq(priv->irq);
-	mutex_unlock(&priv->dev_mutex);
 	return 0;
 }
 

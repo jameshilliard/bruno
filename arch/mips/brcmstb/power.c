@@ -354,6 +354,7 @@ struct clk {
 	void		*cb_arg;
 	void		(*disable)(u32 flags);
 	void		(*enable)(u32 flags);
+	int		(*set_rate)(unsigned long rate);
 	u32		flags;
 	struct list_head list;
 };
@@ -370,6 +371,8 @@ struct clk {
 #define BRCM_PM_FLAG_ENET_WOL	0x02 /* ENET WOL is enabled */
 #define BRCM_PM_FLAG_MOCA_WOL	0x04 /* MoCA WOL is enabled */
 #define BRCM_PM_FLAG_USB_WAKEUP	0x08 /* USB insertion/removal wakeup */
+
+#define BRCM_BASE_CLK		3600 /* base clock in MHz */
 
 #define ANY_WOL(flags) (flags & (BRCM_PM_FLAG_ENET_WOL|BRCM_PM_FLAG_MOCA_WOL))
 #define ENET_WOL(flags) (flags & BRCM_PM_FLAG_ENET_WOL)
@@ -395,6 +398,8 @@ static void brcm_pm_usb_disable(u32 flags);
 static void brcm_pm_usb_enable(u32 flags);
 static void brcm_pm_set_ddr_timeout(int);
 static void brcm_pm_initialize(void);
+static int  brcm_pm_moca_cpu_set_rate(unsigned long rate);
+static int  brcm_pm_moca_phy_set_rate(unsigned long rate);
 
 static int brcm_pm_ddr_timeout;
 static unsigned long brcm_pm_standby_flags;
@@ -408,6 +413,8 @@ enum {
 	BRCM_CLK_NETWORK,	/* PLLs/clocks common to all GENETs */
 	BRCM_CLK_GENET_WOL,
 	BRCM_CLK_MOCA_WOL,
+	BRCM_CLK_MOCA_PHY,
+	BRCM_CLK_MOCA_CPU,
 };
 
 static struct clk brcm_clk_table[] = {
@@ -453,6 +460,14 @@ static struct clk brcm_clk_table[] = {
 		.name		= "moca-wol",
 		.disable	= &brcm_pm_moca_disable_wol,
 		.enable		= &brcm_pm_moca_enable_wol,
+	},
+	[BRCM_CLK_MOCA_CPU ] = {
+		.name		= "moca-cpu",
+		.set_rate	= &brcm_pm_moca_cpu_set_rate,
+	},
+	[BRCM_CLK_MOCA_PHY ] = {
+		.name		= "moca-phy",
+		.set_rate	= &brcm_pm_moca_phy_set_rate,
 	},
 };
 
@@ -790,6 +805,21 @@ struct clk *clk_get_parent(struct clk *clk)
 	return NULL;
 }
 EXPORT_SYMBOL(clk_get_parent);
+
+int clk_set_rate(struct clk *clk, unsigned long rate)
+{
+	unsigned long flags;
+        int ret;
+	spinlock_t *lock = &brcm_pm_clk_lock;
+	if (clk && !IS_ERR(clk) && clk->set_rate) {
+		spin_lock_irqsave(lock, flags);
+		clk->set_rate(rate);
+		spin_unlock_irqrestore(lock, flags);
+		return ret;
+	}
+	return -EINVAL;
+}
+EXPORT_SYMBOL(clk_set_rate);
 
 int brcm_pm_register_cb(char *name, int (*fn)(int, void *), void *arg)
 {
@@ -3519,6 +3549,21 @@ static void brcm_pm_moca_enable(u32 flags)
 {
 	if (chip_pm_ops.moca.enable)
 		chip_pm_ops.moca.enable(brcm_pm_flags | flags);
+}
+
+static int brcm_pm_moca_cpu_set_rate(unsigned long rate)
+{
+	BDEV_WR_F(CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_0,
+		MDIV_CH0, BRCM_BASE_CLK/(rate/1000000));
+	return 0;
+}
+
+static int brcm_pm_moca_phy_set_rate(unsigned long rate)
+{
+ 
+	BDEV_WR_F(CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_1,
+		MDIV_CH1, BRCM_BASE_CLK/(rate/1000000));
+	return 0;
 }
 
 static void brcm_pm_moca_disable_wol(u32 flags)
