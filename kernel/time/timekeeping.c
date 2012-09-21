@@ -376,9 +376,10 @@ int do_settimeofday(struct timespec *tv)
 	#define MAX_DELTA       (30*60)
 	long ar_clock = get_antirollback_clock();
 	if (ar_clock != 0 && tv->tv_sec < (ar_clock - MAX_DELTA)) {
-		printk(KERN_ERR "rejecting settimeofday %lu < antirollback %lu",
+		printk(KERN_ERR "rejecting settimeofday %lu < "
+			"antirollback %lu\n",
 			tv->tv_sec, ar_clock);
-		return -E2BIG;
+		return -EPERM;
 	}
 #endif
 
