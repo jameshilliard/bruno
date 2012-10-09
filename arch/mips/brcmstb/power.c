@@ -768,6 +768,28 @@ void clk_put(struct clk *clk)
 }
 EXPORT_SYMBOL(clk_put);
 
+int clk_set_rate(struct clk *clk, unsigned long rate){
+/* danielmentz 10/9/2012
+TODO: Replace with clk_set_rate() provided by Broadcom. We currently use this
+mock version to make bmoca.c compile.  After complaining that the new
+kernel/bmoca.c makes a reference on line 1784 to clk_set_rate() which is
+undefined in our version of the kernel, Broadcom responded on 09-Oct-2012 as
+part of support case 567480:
+
+"There should have been a patch to power.c included in the MoCA release, but it
+didn't make it into the file...
+
+You can find the patch in the MoCA 2.6.2 release, or you can use the previous
+version of bmoca.c/h with this release.  The changes in bmoca aren't relevant
+for MoCA 1.1: a change to partially enable power save states, which you aren't
+using, and the clk_set_rate change, which merely ends up setting the clock to
+the default value that it was already set to for MoCA 1.1 anyway."
+
+*/
+	return 0;
+}
+EXPORT_SYMBOL(clk_set_rate);
+
 int clk_set_parent(struct clk *clk, struct clk *parent)
 {
 	unsigned long flags;
