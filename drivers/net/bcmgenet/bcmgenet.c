@@ -596,18 +596,8 @@ static void bcmgenet_gphy_link_status(struct work_struct *work)
 {
 	struct BcmEnet_devctrl *pDevCtrl = container_of(work,
 			struct BcmEnet_devctrl, bcmgenet_link_work);
-	int link;
 
-	link = mii_link_ok(&pDevCtrl->mii);
-	if (link && !netif_carrier_ok(pDevCtrl->dev)) {
-		mii_setup(pDevCtrl->dev);
-		pDevCtrl->dev->flags |= IFF_RUNNING;
-		netif_carrier_on(pDevCtrl->dev);
-	} else if (!link && netif_carrier_ok(pDevCtrl->dev)) {
-		printk(KERN_INFO "%s: Link is down\n", pDevCtrl->dev->name);
-		netif_carrier_off(pDevCtrl->dev);
-		pDevCtrl->dev->flags &= ~IFF_RUNNING;
-	}
+	mii_setup(pDevCtrl->dev);
 }
 /* --------------------------------------------------------------------------
 Name: bcmgenet_gphy_link_timer
@@ -680,6 +670,7 @@ static int bcmgenet_open(struct net_device *dev)
 {
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	unsigned long dma_ctrl;
+	volatile struct uniMacRegs *umac = pDevCtrl->umac;
 
 	TRACE(("%s: bcmgenet_open\n", dev->name));
 
@@ -701,6 +692,12 @@ static int bcmgenet_open(struct net_device *dev)
 
 	/* disable ethernet MAC while updating its registers */
 	pDevCtrl->umac->cmd &= ~(CMD_TX_EN | CMD_RX_EN);
+
+	umac->mac_0 = (dev->dev_addr[0] << 24 |
+			dev->dev_addr[1] << 16 |
+			dev->dev_addr[2] << 8  |
+			dev->dev_addr[3]);
+	umac->mac_1 = dev->dev_addr[4] << 8 | dev->dev_addr[5];
 
 	if (pDevCtrl->wol_enabled) {
 		/* From WOL-enabled suspend, switch to regular clock */
@@ -769,7 +766,6 @@ static int bcmgenet_open(struct net_device *dev)
 	napi_enable(&pDevCtrl->napi);
 
 	pDevCtrl->umac->cmd |= (CMD_TX_EN | CMD_RX_EN);
-	pDevCtrl->dev_opened = 1;
 
 #ifdef CONFIG_BRCM_HAS_STANDBY
 	brcm_pm_wakeup_register(&bcmgenet_wakeup_ops, pDevCtrl, dev->name);
@@ -848,7 +844,6 @@ static int bcmgenet_close(struct net_device *dev)
 	if (brcm_pm_deep_sleep())
 		save_state(pDevCtrl);
 
-	pDevCtrl->dev_opened = 0;
 	if (device_may_wakeup(&dev->dev) && pDevCtrl->dev_asleep) {
 		if (pDevCtrl->wolopts & WAKE_MAGIC)
 			bcmgenet_power_down(pDevCtrl, GENET_POWER_WOL_MAGIC);
@@ -966,18 +961,11 @@ static void bcmgenet_set_multicast_list(struct net_device *dev)
 static int bcmgenet_set_mac_addr(struct net_device *dev, void *p)
 {
 	struct sockaddr *addr = p;
-	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
-	volatile struct uniMacRegs *umac = pDevCtrl->umac;
 
 	if (netif_running(dev))
 		return -EBUSY;
 
 	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
-	umac->mac_0 = (dev->dev_addr[0] << 24 |
-			dev->dev_addr[1] << 16 |
-			dev->dev_addr[2] << 8  |
-			dev->dev_addr[3]);
-	umac->mac_1 = dev->dev_addr[4] << 8 | dev->dev_addr[5];
 
 	return 0;
 }
@@ -1872,30 +1860,9 @@ static void bcmgenet_irq_task(struct work_struct *work)
 	}
 
 	/* Link UP/DOWN event */
-	if (pDevCtrl->irq0_stat & UMAC_IRQ_LINK_UP) {
-		printk(KERN_CRIT "%s Link UP.\n", pDevCtrl->dev->name);
-		/* Clear soft-copy of irq status*/
-		pDevCtrl->irq0_stat &= ~UMAC_IRQ_LINK_UP;
-
-		if (!(pDevCtrl->umac->cmd & CMD_AUTO_CONFIG)) {
-			printk(KERN_CRIT "Auto config phy\n");
-			mii_setup(pDevCtrl->dev);
-		}
-		if (!netif_carrier_ok(pDevCtrl->dev)) {
-			pDevCtrl->dev->flags |= IFF_RUNNING;
-			netif_carrier_on(pDevCtrl->dev);
-		}
-
-	} else if (pDevCtrl->irq0_stat & UMAC_IRQ_LINK_DOWN) {
-		printk(KERN_CRIT "%s Link DOWN.\n", pDevCtrl->dev->name);
-		/* clear soft-copy of irq status */
-		pDevCtrl->irq0_stat &= ~UMAC_IRQ_LINK_DOWN;
-		/* TODO:Disable DMA Rx channels.  */
-		/* In case there are packets in the Rx descriptor */
-		if (netif_carrier_ok(pDevCtrl->dev)) {
-			netif_carrier_off(pDevCtrl->dev);
-			pDevCtrl->dev->flags &= ~IFF_RUNNING;
-		}
+	if (pDevCtrl->irq0_stat & (UMAC_IRQ_LINK_UP|UMAC_IRQ_LINK_DOWN)) {
+		pDevCtrl->irq0_stat &= ~(UMAC_IRQ_LINK_UP|UMAC_IRQ_LINK_DOWN);
+		mii_setup(pDevCtrl->dev);
 	}
 }
 /*
@@ -2541,7 +2508,6 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 {
 	volatile struct uniMacRegs *umac;
 	volatile struct intrl2Regs *intrl2;
-	struct net_device *dev = pDevCtrl->dev;
 
 	umac = pDevCtrl->umac;
 	intrl2 = pDevCtrl->intrl2_0;
@@ -2573,12 +2539,9 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 	 */
 	if (pDevCtrl->bIPHdrOptimize)
 		pDevCtrl->rbuf->rbuf_ctrl |= RBUF_ALIGN_2B ;
-
-	umac->mac_0 = (dev->dev_addr[0] << 24 |
-			dev->dev_addr[1] << 16 |
-			dev->dev_addr[2] << 8  |
-			dev->dev_addr[3]);
-	umac->mac_1 = dev->dev_addr[4] << 8 | dev->dev_addr[5];
+#if CONFIG_BRCM_GENET_VERSION >= 3
+	pDevCtrl->rbuf->rbuf_tbuf_size_ctrl = 1;
+#endif
 
 	/* Mask all interrupts.*/
 	intrl2->cpu_mask_set = 0xFFFFFFFF;
@@ -3530,7 +3493,7 @@ static void bcmgenet_get_wol(struct net_device *dev,
 	volatile struct uniMacRegs *umac = pDevCtrl->umac;
 	wol->supported = WAKE_MAGIC | WAKE_MAGICSECURE | WAKE_ARP;
 
-	if (!pDevCtrl->dev_opened)
+	if (!netif_running(dev))
 		return;
 
 	wol->wolopts = pDevCtrl->wolopts;
@@ -3578,15 +3541,15 @@ static int bcmgenet_get_settings(struct net_device *dev,
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	int rc = 0;
 
-	if (!netif_running(dev))
-		return -EINVAL;
-	/* override autoneg on MoCA interface to return link up/down */
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
+		/* see comments in bcmgenet_set_settings() */
 		cmd->autoneg = netif_carrier_ok(pDevCtrl->dev);
 		cmd->speed = SPEED_1000;
 		cmd->duplex = DUPLEX_HALF;
 		cmd->port = PORT_BNC;
 	} else {
+		if (!netif_running(dev))
+			return -EINVAL;
 		rc = mii_ethtool_gset(&pDevCtrl->mii, cmd);
 	}
 
@@ -3601,19 +3564,16 @@ static int bcmgenet_set_settings(struct net_device *dev,
 	int err = 0;
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 
-	if (!netif_running(dev))
-		return -EINVAL;
-	/* override autoneg on MoCA interface to set link up/down */
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
-		if ((cmd->autoneg == 0) && (netif_carrier_ok(pDevCtrl->dev))) {
-			pDevCtrl->dev->flags &= ~IFF_RUNNING;
-			netif_carrier_off(pDevCtrl->dev);
-		}
-		if ((cmd->autoneg != 0) && (!netif_carrier_ok(pDevCtrl->dev))) {
-			pDevCtrl->dev->flags |= IFF_RUNNING;
+		/* mocad uses cmd->autoneg to control our RUNNING flag */
+		if (cmd->autoneg)
 			netif_carrier_on(pDevCtrl->dev);
-		}
+		else
+			netif_carrier_off(pDevCtrl->dev);
 	} else {
+		if (!netif_running(dev))
+			return -EINVAL;
+
 		err = mii_ethtool_sset(&pDevCtrl->mii, cmd);
 		if (err < 0)
 			return err;
@@ -3858,8 +3818,9 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 		if (pDevCtrl->ext) {
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PWR_DN_EN_LD;
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PHY_RESET;
-			udelay(5);
+			udelay(1);
 			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_PHY_RESET;
+			udelay(100);
 		}
 		/* enable 64 clock MDIO */
 		pDevCtrl->mii.mdio_write(pDevCtrl->dev, pDevCtrl->phyAddr, 0x1d,
@@ -3890,8 +3851,9 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 			/* enable APD */
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PWR_DN_EN_LD;
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PHY_RESET;
-			udelay(5);
+			udelay(1);
 			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_PHY_RESET;
+			udelay(100);
 		}
 		/* enable 64 clock MDIO */
 		pDevCtrl->mii.mdio_write(pDevCtrl->dev, pDevCtrl->phyAddr, 0x1d,
@@ -4227,15 +4189,15 @@ static int bcmgenet_drv_suspend(struct device *dev)
 	struct BcmEnet_devctrl *pDevCtrl = dev_get_drvdata(dev);
 
 	cancel_work_sync(&pDevCtrl->bcmgenet_irq_work);
+
+	/*
+	 * Save/restore the interface status across PM modes.
+	 * FIXME: Don't use open/close for suspend/resume.
+	 */
+	pDevCtrl->dev_opened = netif_running(pDevCtrl->dev);
 	if (pDevCtrl->dev_opened && !pDevCtrl->dev_asleep) {
 		pDevCtrl->dev_asleep = 1;
 		val = bcmgenet_close(pDevCtrl->dev);
-		/*
-		 * After close call, dev_opened flag will be 0,
-		 * we need to remember what was the state before
-		 * going into suspend mode.
-		 */
-		pDevCtrl->dev_opened = 1;
 	}
 
 	return val;
