@@ -14,26 +14,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-
-<:copyright-gpl
- Copyright 2007 Broadcom Corp. All Rights Reserved.
-
- This program is free software; you can distribute it and/or modify it
- under the terms of the GNU General Public License (Version 2) as
- published by the Free Software Foundation.
-
- This program is distributed in the hope it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- for more details.
-
- You should have received a copy of the GNU General Public License along
- with this program; if not, write to the Free Software Foundation, Inc.,
- 59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
-:>
-
- <:label-BRCM::DUAL/GPL:standard
- :> 
  */
 
 #ifndef _BMOCA_H_
@@ -64,11 +44,6 @@
 #define MOCA_IOCTL_CHECK_FOR_DATA	_IOR(MOCA_IOC_MAGIC, 5, int)
 #define MOCA_IOCTL_WOL		_IOW(MOCA_IOC_MAGIC, 6, int)
 #define MOCA_IOCTL_GET_DRV_INFO	_IOR(MOCA_IOC_MAGIC, 0, struct moca_kdrv_info)
-
-#define MOCA_IOCTL_SET_CPU_RATE	_IOR(MOCA_IOC_MAGIC, 7, unsigned int)
-#define MOCA_IOCTL_SET_PHY_RATE	_IOR(MOCA_IOC_MAGIC, 8, unsigned int)
-
-#define MOCA_DEVICE_ID_UNREGISTERED  (-1)
 
 /* this must match MoCAOS_IFNAMSIZE */
 #define MOCA_IFNAMSIZ		16
@@ -116,7 +91,7 @@ struct moca_kdrv_info {
 	__u32			macaddr_lo;
 
 	__u32			phy_freq;
-	__u32			device_id;
+	__u32			cpu_freq;
 
 	__u32			chip_id;
 };
@@ -157,7 +132,7 @@ struct moca_platform_data {
 	u32			macaddr_hi;
 	u32			macaddr_lo;
 
-	phys_addr_t		bcm3450_i2c_base;
+	phys_t			bcm3450_i2c_base;
 	int			bcm3450_i2c_addr;
 
 	u32			hw_rev;  /* this is the chip_id */
@@ -165,13 +140,8 @@ struct moca_platform_data {
 
 	int			useDma;
 	int			useSpi;
-	int			devId;
 
 	u32			chip_id;
-
-#ifdef CONFIG_SMP
-	int			smp_processor_id;
-#endif
 };
 
 enum {

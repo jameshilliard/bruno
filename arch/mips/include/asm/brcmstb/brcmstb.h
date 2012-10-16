@@ -253,6 +253,39 @@
 #include <asm/brcmstb/7358a0/bchp_wktmr.h>
 #include <asm/brcmstb/7358a0/brcmirq.h>
 
+#elif defined(CONFIG_BCM7360A0)
+#include <asm/brcmstb/7360a0/bchp_aon_ctrl.h>
+#include <asm/brcmstb/7360a0/bchp_aon_pin_ctrl.h>
+#include <asm/brcmstb/7360a0/bchp_aon_pm_l2.h>
+#include <asm/brcmstb/7360a0/bchp_bspi.h>
+#include <asm/brcmstb/7360a0/bchp_bspi_raf.h>
+#include <asm/brcmstb/7360a0/bchp_clkgen.h>
+#include <asm/brcmstb/7360a0/bchp_common.h>
+#include <asm/brcmstb/7360a0/bchp_ddr40_phy_control_regs_0.h>
+#include <asm/brcmstb/7360a0/bchp_ddr40_phy_word_lane_0_0.h>
+#include <asm/brcmstb/7360a0/bchp_ebi.h>
+#include <asm/brcmstb/7360a0/bchp_hif_cpu_intr1.h>
+#include <asm/brcmstb/7360a0/bchp_hif_intr2.h>
+#include <asm/brcmstb/7360a0/bchp_hif_mspi.h>
+#include <asm/brcmstb/7360a0/bchp_hif_spi_intr2.h>
+#include <asm/brcmstb/7360a0/bchp_hif_top_ctrl.h>
+#include <asm/brcmstb/7360a0/bchp_irq0.h>
+#include <asm/brcmstb/7360a0/bchp_irq1.h>
+#include <asm/brcmstb/7360a0/bchp_mem_dma_0.h>
+#include <asm/brcmstb/7360a0/bchp_memc_ddr_0.h>
+#include <asm/brcmstb/7360a0/bchp_misb_bridge.h>
+#include <asm/brcmstb/7360a0/bchp_nand.h>
+#include <asm/brcmstb/7360a0/bchp_sata_top_ctrl.h>
+#include <asm/brcmstb/7360a0/bchp_sdio_0_cfg.h>
+#include <asm/brcmstb/7360a0/bchp_sun_top_ctrl.h>
+#include <asm/brcmstb/7360a0/bchp_timer.h>
+#include <asm/brcmstb/7360a0/bchp_uarta.h>
+#include <asm/brcmstb/7360a0/bchp_uartb.h>
+#include <asm/brcmstb/7360a0/bchp_uartc.h>
+#include <asm/brcmstb/7360a0/bchp_usb_ctrl.h>
+#include <asm/brcmstb/7360a0/bchp_wktmr.h>
+#include <asm/brcmstb/7360a0/brcmirq.h>
+
 #elif defined(CONFIG_BCM7405B0)
 #include <asm/brcmstb/7405b0/bchp_clk.h>
 #include <asm/brcmstb/7405b0/bchp_common.h>
@@ -924,6 +957,10 @@ ssize_t brcm_pm_store_ddr_timeout(struct device *dev,
 ssize_t brcm_pm_show_standby_flags(struct device *dev,
 	struct device_attribute *attr, char *buf);
 ssize_t brcm_pm_store_standby_flags(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count);
+ssize_t brcm_pm_show_standby_timeout(struct device *dev,
+	struct device_attribute *attr, char *buf);
+ssize_t brcm_pm_store_standby_timeout(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count);
 ssize_t brcm_pm_show_memc1_power(struct device *dev,
 	struct device_attribute *attr, char *buf);
