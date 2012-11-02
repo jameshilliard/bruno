@@ -403,6 +403,7 @@ static int  brcm_pm_moca_phy_set_rate(unsigned long rate);
 
 static int brcm_pm_ddr_timeout;
 static unsigned long brcm_pm_standby_flags;
+static unsigned long brcm_pm_standby_timeout;
 
 enum {
 	BRCM_CLK_SATA,
@@ -567,6 +568,22 @@ ssize_t brcm_pm_store_standby_flags(struct device *dev,
 	return count;
 }
 
+ssize_t brcm_pm_show_standby_timeout(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%lu\n", brcm_pm_standby_timeout);
+}
+
+ssize_t brcm_pm_store_standby_timeout(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long val;
+	if (sscanf(buf, "%lu", &val) != 1)
+		return -EINVAL;
+
+	brcm_pm_standby_timeout = val;
+	return count;
+}
 #if defined(CONFIG_BRCM_HAS_1GB_MEMC1) || defined(CONFIG_BCM7420)
 /*
  * brcm_pm_memc1_power
@@ -3864,6 +3881,10 @@ static int brcm_pm_standby(int mode)
 
 	DBG("%s:%d\n", __func__, __LINE__);
 
+	if (brcm_pm_standby_flags & BRCM_STANDBY_TEST)
+		printk(KERN_INFO "%s: timeout %ld\n",
+			__func__, brcm_pm_standby_timeout);
+
 	do {
 
 		brcm_irq_standby_enter(BRCM_IRQ_STANDBY);
@@ -4002,7 +4023,7 @@ static int brcm_pm_standby(int mode)
 			mdelay(5000);
 	} else {
 		if (brcm_pm_standby_flags & BRCM_STANDBY_TEST)
-			brcm_pm_set_alarm(1);
+			brcm_pm_set_alarm(brcm_pm_standby_timeout ? : 1);
 #if WATCHDOG_TIMER_WAKEUP_ALWAYS
 		else
 			brcm_pm_set_alarm(20);
@@ -4079,7 +4100,7 @@ void brcm_pm_s3_cold_boot(void)
 	brcm_irq_standby_enter(BRCM_IRQ_STANDBY);
 	brcm_pm_wakeup_enable();
 	if (brcm_pm_standby_flags & BRCM_STANDBY_TEST)
-		brcm_pm_set_alarm(3);
+		brcm_pm_set_alarm(brcm_pm_standby_timeout ? : 3);
 	brcm_pm_handshake();
 	BDEV_WR_RB(AON_RAM(0), 0);
 	BDEV_WR_RB(BCHP_AON_CTRL_PM_MIPS_WAIT_COUNT, 0xffff);

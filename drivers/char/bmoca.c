@@ -13,6 +13,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
+ <:label-BRCM::DUAL/GPL:standard
+ :> 
+
  */
 
 #include <linux/module.h>
@@ -47,7 +51,12 @@
 #include "bmoca.h"
 #include <boardparms.h>
 #include <bcm3450.h>
+// board.h cannot declare spinlock, so do it here
+extern spinlock_t bcm_gpio_spinlock;
 #include <linux/netdevice.h>
+#if defined(CONFIG_BCM_6802_MoCA)
+#include <board.h>
+#endif
 #else
 #define MOCA6816		1
 #include <linux/bmoca.h>
@@ -55,7 +64,7 @@
 
 #if defined(CONFIG_BRCMSTB)
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,0,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0)
 #include <linux/brcmstb/brcmstb.h>
 #else
 #include <asm/brcmstb/brcmstb.h>
@@ -219,6 +228,7 @@ struct moca_priv_data {
 	unsigned int		moca2host_mmp_inbox_2_offset;
 	unsigned int		h2m_resp_bit[2]; /* indexed by cpu */
 	unsigned int		h2m_req_bit[2]; /* indexed by cpu */
+   unsigned int      sideband_gmii_fc_offset;
 
 	/* MMP Parameters */
 	unsigned int		mmp_20;
@@ -357,9 +367,11 @@ static const char *bmoca_fw_image;
 #endif
 
 #if MOCA6816
-
+#if defined(CONFIG_BCM_6802_MoCA)
+#include "bmoca-6802.c"
+#else
 #include "bmoca-6816.c"
-
+#endif
 #else
 
 /*
@@ -1180,7 +1192,7 @@ static void moca_work_handler(struct work_struct *work)
 	u32 mask = 0;
 	int ret, stopped = 0;
 
-	if (priv->running) {
+	if (priv->enabled) {
 		mask = moca_irq_status(priv, FLUSH_IRQ);
 		if (mask & M2H_DMA) {
 			mask &= ~M2H_DMA;
@@ -1544,7 +1556,7 @@ static int moca_ioctl_writemem(struct moca_priv_data *priv,
 #ifndef DSL_MOCA
 static int moca_get_phy_freq(struct moca_priv_data *priv)
 {
-	return (priv->phy_freq);
+	return priv->phy_freq;
 }
 #endif
 
@@ -1606,7 +1618,10 @@ static int moca_ioctl_get_drv_info(struct moca_priv_data *priv,
 	info.phy_freq = moca_get_phy_freq(priv);
 
 #ifdef DSL_MOCA
-	info.cpu_freq = moca_get_cpu_freq(priv);
+	info.device_id = 
+		(((struct moca_platform_data *)priv->pdev->dev.platform_data)->devId);
+	moca_read_mac_addr(priv, &pd->macaddr_hi,
+		&pd->macaddr_lo);
 #endif
 
 	memcpy(info.enet_name, pd->enet_name, MOCA_IFNAMSIZ);
@@ -1764,21 +1779,19 @@ static long moca_file_ioctl(struct file *file, unsigned int cmd,
 	case MOCA_IOCTL_SET_CPU_RATE:
 		if (!priv->cpu_clk)
 			ret = -EIO;
-		else
-		{
-			clk_set_rate(priv->cpu_clk, (unsigned int)arg);
-			ret = 0;
+		else {
+#if !defined(DSL_MOCA)
+			ret = clk_set_rate(priv->cpu_clk, (unsigned int)arg);
+#endif
 		}
 		break;
 	case MOCA_IOCTL_SET_PHY_RATE:
 		if (!priv->phy_clk)
 			ret = -EIO;
-		else
-		{
-			printk("Setting MOCA PHY CLK to %d\n", arg);
-
-			clk_set_rate(priv->phy_clk, (unsigned int)arg);
-			ret = 0;
+		else {
+#if !defined(DSL_MOCA)
+			ret = clk_set_rate(priv->phy_clk, (unsigned int)arg);
+#endif
 		}
 		break;
 	}
@@ -2041,28 +2054,65 @@ static int moca_probe(struct platform_device *pdev)
 	priv->cpu_clk = clk_get(&pdev->dev, "moca-cpu");
 	priv->phy_clk = clk_get(&pdev->dev, "moca-phy");
 
+#if !defined(DSL_MOCA)
+	priv->cpu_clk = clk_get(&pdev->dev, "moca-cpu");
+	priv->phy_clk = clk_get(&pdev->dev, "moca-phy");
+#else
+	priv->cpu_clk = NULL;
+	priv->phy_clk = NULL;
+#endif
+
 	priv->hw_rev = pd->hw_rev;
 
 #if MOCA6816
-	priv->data_mem_offset = 0;
-	priv->data_mem_size = (256 * 1024);
-	priv->cntl_mem_offset = 0x0004c000;
-	priv->cntl_mem_size = (80 * 1024);
-	priv->gp0_offset = 0x000a1418;
-	priv->gp1_offset = 0x000a141c;
-	priv->ringbell_offset = 0x000a1404;
-	priv->l2_status_offset = 0x000a2080;
-	priv->l2_clear_offset = 0x000a2088;
-	priv->l2_mask_set_offset = 0x000a2090;
-	priv->l2_mask_clear_offset = 0x000a2094;
-	priv->sw_reset_offset = 0x000a2040;
-	priv->led_ctrl_offset = 0x000a204c;
-	priv->m2m_src_offset = 0x000a2000;
-	priv->m2m_dst_offset = 0x000a2004;
-	priv->m2m_cmd_offset = 0x000a2008;
-	priv->m2m_status_offset = 0x000a200c;
-	priv->h2m_resp_bit[1] = 0x1;
-	priv->h2m_req_bit[1] = 0x2;
+	if (pd->hw_rev == HWREV_MOCA_20) {
+		priv->data_mem_offset = 0;
+		priv->data_mem_size = (640 * 1024);
+		priv->cntl_mem_offset = 0x00108000;
+		priv->cntl_mem_size = (384 * 1024);
+		priv->gp0_offset = 0;
+		priv->gp1_offset = 0;
+		priv->ringbell_offset = 0x001ffd0c;
+		priv->l2_status_offset = 0x001ffc40;
+		priv->l2_clear_offset = 0x001ffc48;
+		priv->l2_mask_set_offset = 0x001ffc50;
+		priv->l2_mask_clear_offset = 0x001ffc54;
+		priv->sw_reset_offset = 0x001ffd00;
+		priv->led_ctrl_offset = 0;
+		priv->m2m_src_offset = 0x001ffc00;
+		priv->m2m_dst_offset = 0x001ffc04;
+		priv->m2m_cmd_offset = 0x001ffc08;
+		priv->m2m_status_offset = 0x001ffc0c;
+		priv->moca2host_mmp_inbox_0_offset = 0x001ffd58;
+		priv->moca2host_mmp_inbox_1_offset = 0x001ffd5c;
+		priv->moca2host_mmp_inbox_2_offset = 0x001ffd60;
+		priv->h2m_resp_bit[1] = 0x10;
+		priv->h2m_req_bit[1] = 0x20;
+		priv->h2m_resp_bit[0] = 0x1;
+		priv->h2m_req_bit[0] = 0x2;
+		priv->sideband_gmii_fc_offset = 0x001fec18;
+	} else {
+		priv->data_mem_offset = 0;
+		priv->data_mem_size = (256 * 1024);
+		priv->cntl_mem_offset = 0x0004c000;
+		priv->cntl_mem_size = (80 * 1024);
+		priv->gp0_offset = 0x000a1418;
+		priv->gp1_offset = 0x000a141c;
+		priv->ringbell_offset = 0x000a1404;
+		priv->l2_status_offset = 0x000a2080;
+		priv->l2_clear_offset = 0x000a2088;
+		priv->l2_mask_set_offset = 0x000a2090;
+		priv->l2_mask_clear_offset = 0x000a2094;
+		priv->sw_reset_offset = 0x000a2040;
+		priv->led_ctrl_offset = 0x000a204c;
+		priv->m2m_src_offset = 0x000a2000;
+		priv->m2m_dst_offset = 0x000a2004;
+		priv->m2m_cmd_offset = 0x000a2008;
+		priv->m2m_status_offset = 0x000a200c;
+		priv->h2m_resp_bit[1] = 0x1;
+		priv->h2m_req_bit[1] = 0x2;
+		priv->sideband_gmii_fc_offset = 0x000a1420;
+	}
 #else
 	if (pd->hw_rev == HWREV_MOCA_11_PLUS) {
 		priv->data_mem_offset = 0;
@@ -2085,6 +2135,7 @@ static int moca_probe(struct platform_device *pdev)
 		priv->m2m_status_offset = 0x000a200c;
 		priv->h2m_resp_bit[1] = 0x1;
 		priv->h2m_req_bit[1] = 0x2;
+		priv->sideband_gmii_fc_offset = 0x000a1420;
 	} else if (pd->hw_rev == HWREV_MOCA_11_LITE) {
 		priv->data_mem_offset = 0;
 		priv->data_mem_size = (96 * 1024);
@@ -2106,6 +2157,7 @@ static int moca_probe(struct platform_device *pdev)
 		priv->m2m_status_offset = 0x000a200c;
 		priv->h2m_resp_bit[1] = 0x1;
 		priv->h2m_req_bit[1] = 0x2;
+		priv->sideband_gmii_fc_offset = 0x000a1420;
 	} else if (pd->hw_rev == HWREV_MOCA_11) {
 		priv->data_mem_offset = 0;
 		priv->data_mem_size = (256 * 1024);
@@ -2126,6 +2178,7 @@ static int moca_probe(struct platform_device *pdev)
 		priv->m2m_status_offset = 0x000a200c;
 		priv->h2m_resp_bit[1] = 0x1;
 		priv->h2m_req_bit[1] = 0x2;
+		priv->sideband_gmii_fc_offset = 0x000a1420;
 	} else if (pd->hw_rev == HWREV_MOCA_20) {
 		priv->data_mem_offset = 0;
 		priv->data_mem_size = (288 * 1024);
@@ -2151,6 +2204,7 @@ static int moca_probe(struct platform_device *pdev)
 		priv->h2m_req_bit[1] = 0x20;
 		priv->h2m_resp_bit[0] = 0x1;
 		priv->h2m_req_bit[0] = 0x2;
+		priv->sideband_gmii_fc_offset = 0x001fec18;
 	} else {
 		priv->data_mem_offset = 0;
 		priv->data_mem_size = (256 * 1024);
@@ -2173,14 +2227,8 @@ static int moca_probe(struct platform_device *pdev)
 		priv->h2m_resp_bit[1] = 0x1;
 		priv->h2m_req_bit[1] = 0x2;
 		pd->chip_id = 0;
+		priv->sideband_gmii_fc_offset = 0x000a1420;
 	}
-#endif
-
-#if defined(CONFIG_BCM7425B0) || defined(CONFIG_BCM7435A0) 
-	BDEV_WR_F_RB(CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_1, MDIV_CH1, 10); 
-	priv->phy_freq = 360;
-#else
-	priv->phy_freq = 300;
 #endif
 
 	init_waitqueue_head(&priv->host_msg_wq);
@@ -2215,14 +2263,20 @@ static int moca_probe(struct platform_device *pdev)
 	}
 
 	mres = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+#if !defined(CONFIG_BCM_6802_MoCA)
 	ires = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+#else 
+   ires = mres;
+#endif
 	if (!mres || !ires) {
 		printk(KERN_ERR "%s: can't get resources\n", __func__);
 		err = -EIO;
 		goto bad;
 	}
 	priv->base = ioremap(mres->start, mres->end - mres->start + 1);
+#if !defined(CONFIG_BCM_6802_MoCA)
 	priv->irq = ires->start;
+#endif
 	priv->i2c_base = ioremap(pd->bcm3450_i2c_base, sizeof(struct bsc_regs));
 
 	/* leave core in reset until we get an ioctl */
@@ -2233,12 +2287,19 @@ static int moca_probe(struct platform_device *pdev)
 
 	moca_hw_reset(priv);
 
+#if defined(CONFIG_BCM_6802_MoCA)
+	kerSysRegisterMocaHostIntrCallback(
+		(MocaHostIntrCallback) moca_interrupt, 
+		(void *)priv, pd->devId);
+#else
 	if (request_irq(priv->irq, moca_interrupt, 0, "moca", priv) < 0) {
 		printk(KERN_WARNING  "%s: can't request interrupt\n",
 			__func__);
 		err = -EIO;
 		goto bad2;
 	}
+#endif
+
 	moca_hw_init(priv, MOCA_ENABLE);
 	moca_disable_irq(priv);
 	moca_msg_reset(priv);
@@ -2259,11 +2320,13 @@ static int moca_probe(struct platform_device *pdev)
 
 	return 0;
 
+#if !defined(CONFIG_BCM_6802_MoCA)
 bad2:
 	if (priv->base)
 		iounmap(priv->base);
 	if (priv->i2c_base)
 		iounmap(priv->i2c_base);
+#endif
 bad:
 	kfree(priv);
 	return err;
@@ -2278,7 +2341,9 @@ static int moca_remove(struct platform_device *pdev)
 		device_destroy(moca_class, MKDEV(MOCA_MAJOR, priv->minor));
 	minor_tbl[priv->minor] = NULL;
 
+#if !defined(CONFIG_BCM_6802_MoCA)
 	free_irq(priv->irq, priv);
+#endif
 	iounmap(priv->i2c_base);
 	iounmap(priv->base);
 	kfree(priv);
@@ -2291,7 +2356,8 @@ static int moca_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM
 static int moca_suspend(struct device *dev)
 {
-	/* do not do anything on suspend.  MoCA core is not necessarily stopped */
+	/* do not do anything on suspend.
+	MoCA core is not necessarily stopped */
 	return 0;
 }
 
@@ -2344,15 +2410,14 @@ static int moca_init(void)
 #endif
 
 #ifdef DSL_MOCA
-	retVal = BpGet6829PortInfo(&portInfo6829);
-	if (retVal != BP_SUCCESS) {
-		printk(KERN_ERR "bmoca: can't read board params\n");
-		portInfo6829 = 0;
+	ret = moca_platform_dev_register();
+
+	if (ret < 0) {
+		printk(KERN_ERR "bmoca: can't register platform_device\n");
 		goto bad3;
 	}
-	if (portInfo6829)
-		platform_device_register(&moca1_plat_dev);
 #endif
+
 	ret = platform_driver_register(&moca_plat_drv);
 	if (ret < 0) {
 		printk(KERN_ERR "bmoca: can't register platform_driver\n");
@@ -2362,11 +2427,8 @@ static int moca_init(void)
 	return 0;
 
 bad3:
-#if MOCA6816
-	platform_device_unregister(&moca_plat_dev);
-
-	if (portInfo6829)
-		platform_device_unregister(&moca1_plat_dev);
+#ifdef DSL_MOCA
+	moca_platform_dev_unregister();
 #endif
 	class_destroy(moca_class);
 bad2:
@@ -2385,7 +2447,7 @@ static void moca_exit(void)
 	unregister_chrdev(MOCA_MAJOR, MOCA_CLASS);
 	platform_driver_unregister(&moca_plat_drv);
 #ifdef DSL_MOCA
-	platform_device_unregister(&moca_plat_dev);
+	moca_platform_dev_unregister();
 #endif
 
 #ifdef DSL_MOCA

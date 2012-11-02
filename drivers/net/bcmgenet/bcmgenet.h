@@ -36,7 +36,7 @@
 #define DMA_MAX_BURST_LENGTH    0x10
 
 #define GENET_TX_RING_COUNT		16
-#define GENET_RX_RING_COUNT		16
+#define GENET_RX_RING_COUNT		17
 #define GENET_ALLOC_TX_RING		1
 #define GENET_ALLOC_RX_RING		0
 
@@ -93,16 +93,16 @@ struct BcmEnet_devctrl {
 	/* transmit variables */
 	volatile struct tDmaRegs *txDma;/* location of tx Dma register */
 	volatile struct DmaDesc *txBds;	/* location of tx Dma BD ring */
-	struct Enet_CB *txCbs;	/* locaation of tx control block pool */
+	struct Enet_CB *txCbs;	/* location of tx control block pool */
 	int	nrTxBds;		/* number of transmit bds */
 	int	txFreeBds;		/* # of free transmit bds */
 	int	txLastCIndex;	/* consumer index for the last xmit call */
 
-	struct Enet_CB *txRingCBs[16];	/* tx ring buffer control block*/
-	unsigned int txRingSize[16];	/* size of each tx ring */
-	unsigned int txRingCIndex[16];	/* last consumer index of each ring*/
-	int txRingFreeBds[16];	/* # of free bds for each ring */
-	unsigned char *txRingStart[16];	/* tx ring start addr */
+	struct Enet_CB *txRingCBs[GENET_TX_RING_COUNT];	/* tx ring buffer control block*/
+	unsigned int txRingSize[GENET_TX_RING_COUNT];	/* size of each tx ring */
+	unsigned int txRingCIndex[GENET_TX_RING_COUNT];	/* last consumer index of each ring*/
+	int txRingFreeBds[GENET_TX_RING_COUNT];	/* # of free bds for each ring */
+	unsigned char *txRingStart[GENET_TX_RING_COUNT];	/* tx ring start addr */
 
 	/* receive variables */
 	volatile struct rDmaRegs *rxDma;	/* location of rx dma  */
@@ -112,16 +112,16 @@ struct BcmEnet_devctrl {
 	int	nrRxBds;	/* number of receive bds */
 	int	rxBufLen;	/* size of rx buffers for DMA */
 
-	struct Enet_CB *rxRingCbs[16];	/* rx ring buffer control */
-	unsigned int rxRingSize[16];	/* size of each ring */
-	unsigned int rxRingCIndex[16];	/* consumer index for each ring */
-	unsigned int rxRingDiscCnt[16];	/* # of discarded pkt for each ring */
-	unsigned char *rxRingStart[16];	/* ring buffer start addr.*/
+	struct Enet_CB *rxRingCbs[GENET_RX_RING_COUNT];	/* rx ring buffer control */
+	unsigned int rxRingSize[GENET_RX_RING_COUNT];	/* size of each ring */
+	unsigned int rxRingCIndex[GENET_RX_RING_COUNT];	/* consumer index for each ring */
+	unsigned int rxRingDiscCnt[GENET_RX_RING_COUNT];	/* # of discarded pkt for each ring */
+	unsigned char *rxRingStart[GENET_RX_RING_COUNT];	/* ring buffer start addr.*/
 
 	/* other misc variables */
-	int irq0;	/* regular IRQ */
+	int     irq0;	/* regular IRQ */
 	int	irq1;	/* ring buf IRQ */
-	int phyAddr;
+	int     phyAddr;
 	int	phyType;
 	int	bIPHdrOptimize;
 	unsigned int irq0_stat;	/* sw copy of irq0 status, for IRQ BH */

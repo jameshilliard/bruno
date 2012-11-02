@@ -56,6 +56,8 @@ static u8 brcm_primary_macaddr[6] = { 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef };
 unsigned long brcm_base_baud0 = BRCM_BASE_BAUD_STB;	/* UPG UARTA */
 unsigned long brcm_base_baud = BRCM_BASE_BAUD_STB;	/* UPG_UART[BC] */
 
+static void __cpuinit set_board_nmi_handler(void);
+
 unsigned long __initdata cfe_seal;
 unsigned long __initdata cfe_entry;
 unsigned long __initdata cfe_handle;
@@ -213,7 +215,7 @@ static inline int __init parse_boardname(const char *buf, void *slop)
 	}
 #elif defined(CONFIG_BCM7344)
 	/* 7344 is normally MidRF, but the 7418 variant might not be */
-	if (strstarts(buf, "BCM97418SAT"))
+	if (strstarts(buf, "BCM97418SAT") || strstarts(buf, "BCM97418SFF_RVU"))
 		brcm_moca_rf_band = MOCA_BAND_MIDRF;
 	else if (strstarts(buf, "BCM97418"))
 		brcm_moca_rf_band = MOCA_BAND_HIGHRF;
@@ -415,6 +417,7 @@ void __init prom_init(void)
 	board_pinmux_setup();
 
 	bchip_mips_setup();
+	set_board_nmi_handler();
 
 	/* default to SATA (where available) or MTD rootfs */
 #ifdef CONFIG_BRCM_HAS_SATA
@@ -585,11 +588,28 @@ static inline void __cpuinit brcm_nmi_handler_setup(void)
 		brcm_tp1_int_vec_end);
 }
 
-unsigned long __cpuinit brcm_setup_ebase(void)
+static void __cpuinit set_board_nmi_handler(void)
+{
+#if defined(CONFIG_BCM7468) || defined(CONFIG_BCM7550)
+	/*
+	 * Older BMIPS3300 CPUs do not support
+	 * exception vector relocation.
+	 * Do not setup an nmi hander as it will
+	 * overwrite the tlb handler.
+	 */
+#else
+	board_nmi_handler_setup = &brcm_nmi_handler_setup;
+#endif
+}
+
+unsigned long brcm_setup_ebase(void)
 {
 	unsigned long ebase = CAC_BASE;
 #if defined(CONFIG_BCM7468) || defined(CONFIG_BCM7550)
-	/* brain-dead */
+	/*
+	 * Older BMIPS3300 CPUs do not support
+	 * exception vector relocation
+	 */
 #elif defined(CONFIG_BMIPS3300) || defined(CONFIG_BMIPS4380)
 	/*
 	 * Exception vector configuration on BMIPS4380:
@@ -616,7 +636,6 @@ unsigned long __cpuinit brcm_setup_ebase(void)
 #endif
 	ebase = 0x80000400;
 
-	board_nmi_handler_setup = &brcm_nmi_handler_setup;
 #elif defined(CONFIG_BMIPS5000)
 	/*
 	 * BMIPS5000 is similar to BMIPS4380, but it uses different
@@ -634,7 +653,6 @@ unsigned long __cpuinit brcm_setup_ebase(void)
 	write_c0_brcm_bootvec(0xa0088008);
 	write_c0_ebase(ebase);
 
-	board_nmi_handler_setup = &brcm_nmi_handler_setup;
 #endif
 	return ebase;
 }

@@ -256,7 +256,8 @@ void bchip_mips_setup(void)
 #define MMIO_ENDIAN             0
 #endif /* CONFIG_CPU_BIG_ENDIAN */
 
-static int sata3_enable_ssc;
+/* SATA3 SSC per-port bitfield */
+static u32 sata3_enable_ssc;
 
 #define SATA3_MDIO_TXPMD_0_REG_BANK	0x1A0
 #define SATA3_MDIO_BRIDGE_BASE		(BCHP_SATA_GRB_REG_START + 0x100)
@@ -285,6 +286,9 @@ static void brcm_sata3_init_freq(int port, int ssc_enable)
 {
 	u32 bank = SATA3_MDIO_TXPMD_0_REG_BANK + port * 0x10;
 
+	if (ssc_enable)
+		pr_info("SATA3: enabling SSC on port %d\n", port);
+
 	/* TXPMD_control1 - enable SSC force */
 	brcm_sata3_mdio_wr_reg(bank, SATA3_TXPMD_CONTROL1, 0xFFFFFFFC,
 			0x00000003);
@@ -306,9 +310,32 @@ static void brcm_sata3_init_freq(int port, int ssc_enable)
 				0xFFFFFC00, 0x000003DF);
 }
 
+/* Check up to 32 ports, although we typically only have 2 */
+#define SATA_MAX_CHECK_PORTS	32
+
+/*
+ * Check commandline for 'sata3_ssc' options. They can be specified in 2 ways:
+ *  (1) 'sata3_ssc'     -> enable SSC on all ports
+ *  (2) 'sata3_ssc=x,y' -> enable SSC on specific port(s), given a comma-
+ *                         separated list of port numbers
+ */
 static int __init sata3_ssc_setup(char *str)
 {
-	sata3_enable_ssc = 1;
+	int opts[SATA_MAX_CHECK_PORTS + 1], i;
+
+	if (*str == '\0') {
+		/* enable SSC on all ports */
+		sata3_enable_ssc = ~0;
+		return 0;
+	}
+	get_options(str + 1, SATA_MAX_CHECK_PORTS, opts);
+
+	for (i = 0; i < opts[0]; i++) {
+		int port = opts[i + 1];
+		if ((port >= 0) && (port < SATA_MAX_CHECK_PORTS))
+			sata3_enable_ssc |= 1 << port;
+	}
+
 	return 0;
 }
 
@@ -325,7 +352,7 @@ void bchip_sata3_init(void)
 			(DATA_ENDIAN << 2) | (MMIO_ENDIAN << 0));
 
 	for (i = 0; i < ports; i++)
-		brcm_sata3_init_freq(i, sata3_enable_ssc);
+		brcm_sata3_init_freq(i, sata3_enable_ssc & (1 << i));
 #endif
 }
 
@@ -488,16 +515,30 @@ static int __init nommc_setup(char *str)
 
 __setup("nommc", nommc_setup);
 
-int __init bchip_sdio_init(int id, uintptr_t cfg_base)
+int bchip_sdio_init(int id, uintptr_t cfg_base)
 {
-#define SDIO_REG(x, y)		(x + BCHP_SDIO_0_CFG_##y - \
+#define SDIO_CFG_REG(x, y)	(x + BCHP_SDIO_0_CFG_##y - \
 				 BCHP_SDIO_0_CFG_REG_START)
+#define SDIO_CFG_SET(base, reg, mask) do {				\
+		BDEV_SET(SDIO_CFG_REG(base, reg),			\
+			 BCHP_SDIO_0_CFG_##reg##_##mask##_MASK);	\
+	} while (0)
+#define SDIO_CFG_UNSET(base, reg, mask) do {				\
+		BDEV_UNSET(SDIO_CFG_REG(base, reg),			\
+			   BCHP_SDIO_0_CFG_##reg##_##mask##_MASK);	\
+	} while (0)
+#define SDIO_CFG_FIELD(base, reg, field, val) do {			\
+		BDEV_UNSET(SDIO_CFG_REG(base, reg),			\
+			   BCHP_SDIO_0_CFG_##reg##_##field##_MASK);	\
+		BDEV_SET(SDIO_CFG_REG(base, reg),			\
+		 (val) << BCHP_SDIO_0_CFG_##reg##_##field##_SHIFT);	\
+	} while (0)
 
 	if (nommc) {
 		printk(KERN_INFO "SDIO_%d: disabled via command line\n", id);
 		return -ENODEV;
 	}
-	if (BDEV_RD(SDIO_REG(cfg_base, SCRATCH)) & 0x01) {
+	if (BDEV_RD(SDIO_CFG_REG(cfg_base, SCRATCH)) & 0x01) {
 		printk(KERN_INFO "SDIO_%d: disabled by bootloader\n", id);
 		return -ENODEV;
 	}
@@ -506,28 +547,57 @@ int __init bchip_sdio_init(int id, uintptr_t cfg_base)
 		"disabling\n", id);
 	return -ENODEV;
 #endif
-	printk(KERN_INFO "SDIO_%d: enabling controller\n", id);
+	/*
+	 * The following chips have SDIO issues and will not run correctly
+	 * at 50MHz so disable them.
+	 */
+#if defined(CONFIG_BCM7425B0) || defined(CONFIG_BCM7429A0) || \
+	defined(CONFIG_BCM7435A0)
+	/* Enable just the 7425B2 */
+	if ((BRCM_CHIP_ID() != 0x7425) || (BRCM_CHIP_REV() < 0x12)) {
+		printk(KERN_INFO "SDIO_%d: disabled due to chip issues\n", id);
+		return -ENODEV;
+	} else {
+		/* For 7425B2, use manual input clock tuning to work */
+		/* around a chip problem, and disable UHS and TUNING. */
+		SDIO_CFG_FIELD(cfg_base, CAP_REG0, SLOT_TYPE, 1);
+		SDIO_CFG_UNSET(cfg_base, CAP_REG0, DDR50_SUPPORT);
+		SDIO_CFG_UNSET(cfg_base, CAP_REG0, SDR50);
+		SDIO_CFG_UNSET(cfg_base, CAP_REG1, USE_TUNING);
+		SDIO_CFG_SET(cfg_base, CAP_REG1, CAP_REG_OVERRIDE);
 
-	BDEV_UNSET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL1), 0xf000);
-	BDEV_UNSET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL2), 0x00ff);
+		/* enable input delay, resolution = 1, value = 8 */
+		SDIO_CFG_FIELD(cfg_base, IP_DLY, IP_TAP_DELAY, 8);
+		SDIO_CFG_FIELD(cfg_base, IP_DLY, IP_DELAY_CTRL, 1);
+		SDIO_CFG_SET(cfg_base, IP_DLY, IP_TAP_EN);
+
+		/* Use the manual clock delay */
+		SDIO_CFG_FIELD(cfg_base, SD_CLOCK_DELAY, INPUT_CLOCK_DELAY, 8);
+	}
+
+#endif
+
+	printk(KERN_INFO "SDIO_%d: enabling controller\n", id);
+	BDEV_UNSET(SDIO_CFG_REG(cfg_base, SDIO_EMMC_CTRL1), 0xf000);
+	BDEV_UNSET(SDIO_CFG_REG(cfg_base, SDIO_EMMC_CTRL2), 0x00ff);
 #ifdef CONFIG_CPU_LITTLE_ENDIAN
 	/* FRAME_NHW | BUFFER_ABO */
-	BDEV_SET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL1), 0x3000);
+	BDEV_SET(SDIO_CFG_REG(cfg_base, SDIO_EMMC_CTRL1), 0x3000);
 #else
 	/* WORD_ABO | FRAME_NBO | FRAME_NHW */
-	BDEV_SET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL1), 0xe000);
+	BDEV_SET(SDIO_CFG_REG(cfg_base, SDIO_EMMC_CTRL1), 0xe000);
 	/* address swap only */
-	BDEV_SET(SDIO_REG(cfg_base, SDIO_EMMC_CTRL2), 0x0050);
+	BDEV_SET(SDIO_CFG_REG(cfg_base, SDIO_EMMC_CTRL2), 0x0050);
 	sdhci_brcm_pdata.ops = &sdhci_be_ops;
 #endif
 
 #if defined(CONFIG_BCM7231B0) || defined(CONFIG_BCM7346B0)
-	BDEV_SET(SDIO_REG(cfg_base, CAP_REG1), BIT(31));	/* Override=1 */
+	BDEV_SET(SDIO_CFG_REG(cfg_base, CAP_REG1), BIT(31));	/* Override=1 */
 #endif
 
 #if defined(CONFIG_BCM7344B0)
-	BDEV_UNSET(SDIO_REG(cfg_base, CAP_REG0), BIT(19));	/* Highspd=0 */
-	BDEV_SET(SDIO_REG(cfg_base, CAP_REG1), BIT(31));	/* Override=1 */
+	BDEV_UNSET(SDIO_CFG_REG(cfg_base, CAP_REG0), BIT(19));	/* Highspd=0 */
+	BDEV_SET(SDIO_CFG_REG(cfg_base, CAP_REG1), BIT(31));	/* Override=1 */
 #endif
 
 	return 0;

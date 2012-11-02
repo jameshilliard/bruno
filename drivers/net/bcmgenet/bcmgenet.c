@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2002-2008 Broadcom Corporation
  *
@@ -64,45 +65,55 @@
 #error "This version of GENET doesn't support tx multi queue"
 #endif
 /* Default # of tx queues for multi queue support */
-#define GENET_MQ_CNT		1
-/* Default # of bds for each queue for multi queue support */
-#define GENET_MQ_BD_CNT		128
-/* Default highest priority queue for multi queue support */
-#define GENET_Q0_PRIORITY	0
+#define GENET_TX_MQ_CNT		1
+/* Default # of bds for each priority tx queue for multi queue support */
+#define GENET_TX_MQ_BD_CNT		128
 
-#define GENET_DEFAULT_BD_CNT	\
-	(TOTAL_DESC - GENET_MQ_CNT * GENET_MQ_BD_CNT)
-
-/* Default # of bds for each priority rx queue for multi queue support. */
+/* Default # of additional rx queues for multi queue support */
+#define GENET_RX_MQ_CNT		1
+/* Default # of bds for each priority rx queue for multi queue support */
 #define	GENET_RX_MQ_BD_CNT		128
 
-static void bcmgenet_init_multiq(struct net_device *dev);
+/* Highest priority is given to the tx descriptor ring 0.
+ * All other rings are mapped to lower priorities (higher numerical values) */
+#define GENET_TX_Q0_PRIORITY	0
+
+
+static void bcmgenet_init_multiq_tx(struct net_device *dev);
 static void bcmgenet_init_multiq_rx(struct net_device *dev);
 
 #else
-#define	GENET_RX_MQ_BD_CNT		0
+#define GENET_RX_MQ_CNT		0
+#define GENET_RX_MQ_BD_CNT      0
+
+#define GENET_TX_MQ_CNT		0
+#define GENET_TX_MQ_BD_CNT		0
 #endif	/*CONFIG_NET_SCH_MULTIQ */
 
-/* Default # of priority rx queues for multi queue support */
-#define	GENET_RX_MQ_CNT		1
 /* Total number or priority descriptors must be less than TOTAL_DESC */
 #define	GENET_RX_TOTAL_MQ_BD	(GENET_RX_MQ_CNT * GENET_RX_MQ_BD_CNT)
+#define	GENET_TX_TOTAL_MQ_BD	(GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT)
+
 #if GENET_RX_TOTAL_MQ_BD > TOTAL_DESC
-#error Total number or priority descriptors must be less than TOTAL_DESC.
+#error Total number or rx priority descriptors must be less than TOTAL_DESC.
 #else
-#define	GENET_DEFAULT_RX_BD_CNT	(TOTAL_DESC - GENET_RX_TOTAL_MQ_BD)
+#define	GENET_RX_DEFAULT_BD_CNT	(TOTAL_DESC - GENET_RX_TOTAL_MQ_BD)
 #endif
 
+#if GENET_TX_TOTAL_MQ_BD > TOTAL_DESC
+#error Total number or tx priority descriptors must be less than TOTAL_DESC.
+#else
+#define GENET_TX_DEFAULT_BD_CNT	(TOTAL_DESC - GENET_TX_TOTAL_MQ_BD)
+#endif
 
 #define RX_BUF_LENGTH		2048
 #define RX_BUF_BITS			12
 #define SKB_ALIGNMENT		32
 #define DMA_DESC_THRES		4
-#define HFB_TCP_LEN			19
 #define HFB_ARP_LEN			21
 
 /* NAPI budget for the default queue (queue 16) */
-#define	DEFAULT_DESC_BUDGET		GENET_DEFAULT_RX_BD_CNT
+#define	DEFAULT_DESC_BUDGET		GENET_RX_DEFAULT_BD_CNT
 #define	THROTTLED_DESC_BUDGET		2
 
 /*
@@ -141,16 +152,16 @@ static void bcmgenet_init_multiq_rx(struct net_device *dev);
 
 /* Tx/Rx DMA register offset, skip 256 descriptors */
 #define GENET_TDMA_REG_OFF	(GENET_TDMA_OFF + \
-		2*TOTAL_DESC*sizeof(unsigned long))
+		2 * TOTAL_DESC * sizeof(unsigned long))
 #define GENET_RDMA_REG_OFF	(GENET_RDMA_OFF + \
-		2*TOTAL_DESC*sizeof(unsigned long))
+		2 * TOTAL_DESC * sizeof(unsigned long))
 
 #ifdef	CONFIG_BRUNO
 #define	GENET0_DEVICE_NAME	    "eth0"
 /*
  * GENET MDIO Configuration Register.
  *
- * 31       10 9              4 3      1           0
+ * 31       10 9	      4 3      1	   0
  * --------------------------------------------------
  * | Reserved |mdio_clk_divider|Reserved|mdio_clause|
  * --------------------------------------------------
@@ -236,12 +247,21 @@ static struct sk_buff *__bcmgenet_alloc_skb_from_buf(unsigned char *buf,
 /* clock control */
 static void bcmgenet_clock_enable(struct BcmEnet_devctrl *pDevCtrl);
 static void bcmgenet_clock_disable(struct BcmEnet_devctrl *pDevCtrl);
+
 /* S3 warm boot */
 static void save_state(struct BcmEnet_devctrl *pDevCtrl);
 static void restore_state(struct BcmEnet_devctrl *pDevCtrl);
-/* HFB filtering for PCP*/
-static void bcmgenet_enable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl);
-static void bcmgenet_disable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl);
+
+/* HFB filtering for IPv4 multicast */
+static int bcmgenet_enable_multicast_hfb(struct BcmEnet_devctrl *pDevCtrl);
+
+/* HFB filtering for PCP */
+static void bcmgenet_enable_pcp_hfb(struct BcmEnet_devctrl *pDevCtrl);
+static void bcmgenet_disable_pcp_hfb(struct BcmEnet_devctrl *pDevCtrl);
+
+
+static int bcmgenet_update_hfb(struct net_device *dev, unsigned int *data,
+			       int len, int user);
 
 static struct net_device *eth_root_dev;
 static int DmaDescThres = DMA_DESC_THRES;
@@ -250,10 +270,15 @@ static int DmaDescThres = DMA_DESC_THRES;
 static int desc_budget = DEFAULT_DESC_BUDGET;
 
 /* bcmgenet multi-queue budget count variables for debugfs*/
+
+static struct dentry *bcmgenet_debugfs_root = NULL;
+
+#ifdef CONFIG_NET_SCH_MULTIQ
 static u32 bcmgenet_rx_mq_bd_cnt = GENET_RX_MQ_BD_CNT;
-static u32 bcmgenet_tx_mq_bd_cnt = GENET_MQ_BD_CNT;
-static u32 bcmgenet_tx_default_bd_cnt = GENET_DEFAULT_BD_CNT;
-static u32 bcmgenet_tx_mq_cnt = GENET_MQ_CNT;
+static u32 bcmgenet_tx_mq_bd_cnt = GENET_TX_MQ_BD_CNT;
+static u32 bcmgenet_tx_mq_cnt = GENET_TX_MQ_CNT;
+#endif
+static u32 bcmgenet_tx_default_bd_cnt = GENET_TX_DEFAULT_BD_CNT;
 
 /* bcmgenet debugfs variable pointer and file name */
 typedef struct {
@@ -264,8 +289,11 @@ typedef struct {
 /* Initialization function of bcmgenet debugfs variable pointer and file name*/
 #define BCMGENET_DEBUGFS(x) {.dbfs_p = &x, .dbfs_name = #x}
 
-static int bcmgenet_debugfs_create(void);
-static int bcmgenet_debugfs_create_u32(bcmgenet_debugfs bcmgenet_dbfs, int op, struct dentry *rtdir);
+static int bcmgenet_debugfs_create(struct BcmEnet_devctrl *dev);
+static int bcmgenet_debugfs_create_u32(bcmgenet_debugfs bcmgenet_dbfs, 
+				       int op, struct dentry *rtdir);
+static int bcmgenet_debugfs_create_indexed_u32(unsigned int *var, int index,
+					       int op, struct dentry *rtdir);
 
 #ifdef CONFIG_BCM7429A0
 static void bcm7429_ephy_workaround(struct BcmEnet_devctrl *pDevCtrl)
@@ -281,20 +309,36 @@ static void bcm7429_ephy_workaround(struct BcmEnet_devctrl *pDevCtrl)
 	pDevCtrl->mii.mdio_write(pDevCtrl->dev, pDevCtrl->phyAddr, 0x1f, data);
 }
 #endif
+
 /*
  * HFB data for ARP request.
- * In WoL (Magic Packet or ACPI) mode, we need to response
+ * * In WoL (Magic Packet or ACPI) mode, we need to response
  * ARP request, so dedicate an HFB to filter the ARP request.
  * NOTE: the last two words are to be filled by destination.
  */
 static unsigned int hfb_arp[] = {
-	0x000FFFFF, 0x000FFFFF, 0x000FFFFF,	0x00000000,
-	0x00000000, 0x00000000, 0x000F0806,	0x000F0001,
-	0x000F0800,	0x000F0604, 0x000F0001,	0x00000000,
-	0x00000000,	0x00000000,	0x00000000, 0x00000000,
-	0x000F0000,	0x000F0000,	0x000F0000,	0x000F0000,
-	0x000F0000
+        0x000FFFFF, 0x000FFFFF, 0x000FFFFF,	0x00000000,
+        0x00000000, 0x00000000, 0x000F0806,	0x000F0001,
+        0x000F0800, 0x000F0604, 0x000F0001,	0x00000000,
+        0x00000000,	0x00000000,	0x00000000, 0x00000000,
+        0x000F0000,	0x000F0000,	0x000F0000,	0x000F0000,
+        0x000F0000
 };
+
+/*
+ * HFB data for IPv4 packets with a multicast address in their dst field.
+ * Match:
+ * - Ethernet frame must use Type IP (0x0800)
+ * - IP version field must be 4
+ * - First nibble (not byte) of dst IP address must be 0xe.
+ */
+static unsigned int hfb_ipv4_multicast[] = {
+	/* offset 0x00: */ 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	/* offset 0x08: */ 0x00000000, 0x00000000, 0x000F0800, 0x00084000,
+	/* offset 0x10: */ 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	/* offset 0x18: */ 0x00000000, 0x00000000, 0x00000000, 0x0008e000,
+};
+
 /* -------------------------------------------------------------------------
  *  The following bcmemac_xxxx() functions are legacy netaccel hook, will be
  *  replaced!
@@ -331,7 +375,7 @@ int bcmemac_xmit_check(struct net_device *dev)
 	*/
 	spin_lock_irqsave(&pDevCtrl->lock, flags);
 	/* Compute how many buffers are transmited since last xmit call */
-	c_index = pDevCtrl->txDma->tDmaRings[16].tdma_consumer_index;
+	c_index = pDevCtrl->txDma->tDmaRings[GENET_TX_RING_COUNT].tdma_consumer_index;
 	c_index &= (TOTAL_DESC - 1);
 
 	if (c_index >= pDevCtrl->txLastCIndex)
@@ -342,15 +386,15 @@ int bcmemac_xmit_check(struct net_device *dev)
 	TRACE(("c_index=%d lastTxedCnt=%d txLastCIndex=%d\n",
 				c_index, lastTxedCnt, pDevCtrl->txLastCIndex));
 
-	/* Recalaim transmitted buffers */
+	/* Reclaim transmitted buffers */
 	i = pDevCtrl->txLastCIndex;
 	while (lastTxedCnt-- > 0) {
 		txCBPtr = &pDevCtrl->txCbs[i];
 		if (txCBPtr->skb != NULL) {
 			dma_unmap_single(&pDevCtrl->dev->dev,
-					txCBPtr->dma_addr,
-					txCBPtr->skb->len,
-					DMA_TO_DEVICE);
+					 txCBPtr->dma_addr,
+					 txCBPtr->skb->len,
+					 DMA_TO_DEVICE);
 			dev_kfree_skb_any(txCBPtr->skb);
 			txCBPtr->skb = NULL;
 		}
@@ -391,7 +435,7 @@ int bcmemac_xmit_fragment(int ch, unsigned char *buf, int buf_len,
 	/*
 	 * We must don't have 64B status block enabled in this case!
 	 */
-	write_ptr = pDevCtrl->txDma->tDmaRings[16].tdma_write_pointer;
+	write_ptr = pDevCtrl->txDma->tDmaRings[GENET_TX_RING_COUNT].tdma_write_pointer;
 	write_ptr = ((write_ptr & DMA_RW_POINTER_MASK) >> 1);
 
 	/* Obtain transmit control block */
@@ -405,7 +449,7 @@ int bcmemac_xmit_fragment(int ch, unsigned char *buf, int buf_len,
 	 * Set addr and length of DMA BD to be transmitted.
 	 */
 	txCBPtr->BdAddr->address = txCBPtr->dma_addr;
-	txCBPtr->BdAddr->length_status = ((unsigned long)(buf_len))<<16;
+	txCBPtr->BdAddr->length_status = ((unsigned long)(buf_len)) << 16;
 	txCBPtr->BdAddr->length_status |= tx_flags | DMA_TX_APPEND_CRC;
 
 	/* Default QTAG for MoCA */
@@ -552,18 +596,8 @@ static void bcmgenet_gphy_link_status(struct work_struct *work)
 {
 	struct BcmEnet_devctrl *pDevCtrl = container_of(work,
 			struct BcmEnet_devctrl, bcmgenet_link_work);
-	int link;
 
-	link = mii_link_ok(&pDevCtrl->mii);
-	if (link && !netif_carrier_ok(pDevCtrl->dev)) {
-		mii_setup(pDevCtrl->dev);
-		pDevCtrl->dev->flags |= IFF_RUNNING;
-		netif_carrier_on(pDevCtrl->dev);
-	} else if (!link && netif_carrier_ok(pDevCtrl->dev)) {
-		printk(KERN_INFO "%s: Link is down\n", pDevCtrl->dev->name);
-		netif_carrier_off(pDevCtrl->dev);
-		pDevCtrl->dev->flags &= ~IFF_RUNNING;
-	}
+	mii_setup(pDevCtrl->dev);
 }
 /* --------------------------------------------------------------------------
 Name: bcmgenet_gphy_link_timer
@@ -636,6 +670,7 @@ static int bcmgenet_open(struct net_device *dev)
 {
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	unsigned long dma_ctrl;
+	volatile struct uniMacRegs *umac = pDevCtrl->umac;
 
 	TRACE(("%s: bcmgenet_open\n", dev->name));
 
@@ -657,6 +692,12 @@ static int bcmgenet_open(struct net_device *dev)
 
 	/* disable ethernet MAC while updating its registers */
 	pDevCtrl->umac->cmd &= ~(CMD_TX_EN | CMD_RX_EN);
+
+	umac->mac_0 = (dev->dev_addr[0] << 24 |
+			dev->dev_addr[1] << 16 |
+			dev->dev_addr[2] << 8  |
+			dev->dev_addr[3]);
+	umac->mac_1 = dev->dev_addr[4] << 8 | dev->dev_addr[5];
 
 	if (pDevCtrl->wol_enabled) {
 		/* From WOL-enabled suspend, switch to regular clock */
@@ -725,7 +766,6 @@ static int bcmgenet_open(struct net_device *dev)
 	napi_enable(&pDevCtrl->napi);
 
 	pDevCtrl->umac->cmd |= (CMD_TX_EN | CMD_RX_EN);
-	pDevCtrl->dev_opened = 1;
 
 #ifdef CONFIG_BRCM_HAS_STANDBY
 	brcm_pm_wakeup_register(&bcmgenet_wakeup_ops, pDevCtrl, dev->name);
@@ -804,7 +844,6 @@ static int bcmgenet_close(struct net_device *dev)
 	if (brcm_pm_deep_sleep())
 		save_state(pDevCtrl);
 
-	pDevCtrl->dev_opened = 0;
 	if (device_may_wakeup(&dev->dev) && pDevCtrl->dev_asleep) {
 		if (pDevCtrl->wolopts & WAKE_MAGIC)
 			bcmgenet_power_down(pDevCtrl, GENET_POWER_WOL_MAGIC);
@@ -922,18 +961,11 @@ static void bcmgenet_set_multicast_list(struct net_device *dev)
 static int bcmgenet_set_mac_addr(struct net_device *dev, void *p)
 {
 	struct sockaddr *addr = p;
-	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
-	volatile struct uniMacRegs *umac = pDevCtrl->umac;
 
 	if (netif_running(dev))
 		return -EBUSY;
 
 	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
-	umac->mac_0 = (dev->dev_addr[0] << 24 |
-			dev->dev_addr[1] << 16 |
-			dev->dev_addr[2] << 8  |
-			dev->dev_addr[3]);
-	umac->mac_1 = dev->dev_addr[4] << 8 | dev->dev_addr[5];
 
 	return 0;
 }
@@ -1075,22 +1107,23 @@ static struct Enet_CB *bcmgenet_get_txcb(struct net_device *dev,
 {
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	struct Enet_CB *txCBPtr = NULL;
+
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
 	if (index == DESC_INDEX) {
 		txCBPtr = pDevCtrl->txCbs;
-		txCBPtr += (*pos - GENET_MQ_CNT*GENET_MQ_BD_CNT);
+		txCBPtr += (*pos - GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT);
 		txCBPtr->BdAddr = &pDevCtrl->txBds[*pos];
 		if (*pos == (TOTAL_DESC - 1))
-			*pos = (GENET_MQ_CNT*GENET_MQ_BD_CNT);
+			*pos = (GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT);
 		else
 			*pos += 1;
 
 	} else {
 		txCBPtr = pDevCtrl->txRingCBs[index];
-		txCBPtr += (*pos - index*GENET_MQ_BD_CNT);
+		txCBPtr += (*pos - index * GENET_TX_MQ_BD_CNT);
 		txCBPtr->BdAddr = &pDevCtrl->txBds[*pos];
-		if (*pos == (GENET_MQ_BD_CNT*(index+1) - 1))
-			*pos = GENET_MQ_BD_CNT * index;
+		if (*pos == (GENET_TX_MQ_BD_CNT * (index + 1) - 1))
+			*pos = GENET_TX_MQ_BD_CNT * index;
 		else
 			*pos += 1;
 	}
@@ -1106,6 +1139,7 @@ static struct Enet_CB *bcmgenet_get_txcb(struct net_device *dev,
 
 	return txCBPtr;
 }
+
 /* --------------------------------------------------------------------------
 Name: bcmgenet_tx_reclaim
 Purpose: reclaim xmited skb
@@ -1124,10 +1158,10 @@ static void bcmgenet_tx_reclaim(struct net_device *dev, int index)
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
 	if (index == DESC_INDEX) {
 		lastCIndex = pDevCtrl->txLastCIndex;
-		nrTxBds = GENET_DEFAULT_BD_CNT;
+		nrTxBds = GENET_TX_DEFAULT_BD_CNT;
 	} else {
 		lastCIndex = pDevCtrl->txRingCIndex[index];
-		nrTxBds = GENET_MQ_BD_CNT;
+		nrTxBds = GENET_TX_MQ_BD_CNT;
 	}
 
 #else
@@ -1187,7 +1221,7 @@ static void bcmgenet_tx_reclaim(struct net_device *dev, int index)
 			netif_wake_subqueue(dev, 0);
 		}
 		pDevCtrl->txLastCIndex = c_index;
-	} else{
+	} else {
 		if (pDevCtrl->txRingFreeBds[index] > (MAX_SKB_FRAGS + 1)
 			&& __netif_subqueue_stopped(dev, index+1)) {
 			pDevCtrl->intrl2_1->cpu_mask_set = (1 << index);
@@ -1236,17 +1270,14 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 		index = skb_get_queue_mapping(skb);
 		/*
 		* Mapping strategy:
-		* queue_mapping = 0, unclassfieid, packet xmited through ring16
+		* queue_mapping = 0, unclassified, packet xmited through ring16
 		* queue_mapping = 1, goes to ring 0. (highest priority queue)
-		* queue_mapping = 2, goes to ring 1.
-		* queue_mapping = 3, goes to ring 2.
-		* queue_mapping = 4, goes to ring 3.
 		*/
 		if (index == 0)
 			index = DESC_INDEX;
 		else
 			index -= 1;
-		if (index != DESC_INDEX && index > 3) {
+		if (index != DESC_INDEX && index >= GENET_TX_MQ_CNT) {
 			printk(KERN_ERR "%s: skb->queue_mapping %d is invalid\n",
 					__func__, skb_get_queue_mapping(skb));
 			spin_unlock_irqrestore(&pDevCtrl->lock, flags);
@@ -1264,7 +1295,7 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 				return 1;
 			}
 		} else if (pDevCtrl->txRingFreeBds[index] <= nr_frags + 1) {
-			netif_stop_subqueue(dev, index+1);
+			netif_stop_subqueue(dev, index + 1);
 			spin_unlock_irqrestore(&pDevCtrl->lock, flags);
 			printk(KERN_ERR "%s: tx ring %d full when queue awake\n",
 					__func__, index);
@@ -1272,7 +1303,7 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 		}
 	}
 	/* Reclaim xmited skb for each subqueue */
-	for (i = 0; i < GENET_MQ_CNT; i++)
+	for (i = 0; i < GENET_TX_MQ_CNT; i++)
 		bcmgenet_tx_reclaim(dev, i);
 #else
 	if (skb) {
@@ -1289,7 +1320,7 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	if (!skb) {
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
-		for (i = 0; i < GENET_MQ_CNT; i++)
+		for (i = 0; i < GENET_TX_MQ_CNT; i++)
 			bcmgenet_tx_reclaim(dev, i);
 #endif
 		bcmgenet_tx_reclaim(dev, DESC_INDEX);
@@ -1305,7 +1336,7 @@ static int bcmgenet_xmit(struct sk_buff *skb, struct net_device *dev)
 
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
 	if ((index != DESC_INDEX) && (pDevCtrl->txRingFreeBds[index]
-			< GENET_MQ_BD_CNT - 8))
+			< GENET_TX_MQ_BD_CNT - 8))
 		bcmgenet_tx_reclaim(dev, index);
 #endif
 
@@ -1526,8 +1557,11 @@ static void bcmgenet_tx_ring_reclaim(struct net_device *dev, int index,
 	struct Enet_CB *txCBPtr;
 	int lastTxedCnt = 0, lastCIndex = 0;
 	struct sk_buff *skb;
+	unsigned long flags;
 
 	/* Compute how many buffers are transmited since last xmit call */
+
+	spin_lock_irqsave(&pDevCtrl->lock, flags);
 
 	if (c_index >= pDevCtrl->txRingCIndex[index]) {
 		/* index not wrapped */
@@ -1579,6 +1613,7 @@ static void bcmgenet_tx_ring_reclaim(struct net_device *dev, int index,
 		pDevCtrl->intrl2_1->cpu_mask_set |= (1 << index);
 		netif_wake_queue(dev);
 	}
+	spin_unlock_irqrestore(&pDevCtrl->lock, flags);
 }
 /* --------------------------------------------------------------------------
 Name: bcmgenet_ring_xmit
@@ -1825,30 +1860,9 @@ static void bcmgenet_irq_task(struct work_struct *work)
 	}
 
 	/* Link UP/DOWN event */
-	if (pDevCtrl->irq0_stat & UMAC_IRQ_LINK_UP) {
-		printk(KERN_CRIT "%s Link UP.\n", pDevCtrl->dev->name);
-		/* Clear soft-copy of irq status*/
-		pDevCtrl->irq0_stat &= ~UMAC_IRQ_LINK_UP;
-
-		if (!(pDevCtrl->umac->cmd & CMD_AUTO_CONFIG)) {
-			printk(KERN_CRIT "Auto config phy\n");
-			mii_setup(pDevCtrl->dev);
-		}
-		if (!netif_carrier_ok(pDevCtrl->dev)) {
-			pDevCtrl->dev->flags |= IFF_RUNNING;
-			netif_carrier_on(pDevCtrl->dev);
-		}
-
-	} else if (pDevCtrl->irq0_stat & UMAC_IRQ_LINK_DOWN) {
-		printk(KERN_CRIT "%s Link DOWN.\n", pDevCtrl->dev->name);
-		/* clear soft-copy of irq status */
-		pDevCtrl->irq0_stat &= ~UMAC_IRQ_LINK_DOWN;
-		/* TODO:Disable DMA Rx channels.  */
-		/* In case there are packets in the Rx descriptor */
-		if (netif_carrier_ok(pDevCtrl->dev)) {
-			netif_carrier_off(pDevCtrl->dev);
-			pDevCtrl->dev->flags &= ~IFF_RUNNING;
-		}
+	if (pDevCtrl->irq0_stat & (UMAC_IRQ_LINK_UP|UMAC_IRQ_LINK_DOWN)) {
+		pDevCtrl->irq0_stat &= ~(UMAC_IRQ_LINK_UP|UMAC_IRQ_LINK_DOWN);
+		mii_setup(pDevCtrl->dev);
 	}
 }
 /*
@@ -1903,7 +1917,8 @@ static unsigned int bcmgenet_ring_rx(void *ptr, unsigned int budget)
 			/* Report rx overrun errors */
 			pDevCtrl->dev->stats.rx_over_errors += discard_cnt -
 				pDevCtrl->rxRingDiscCnt[i];
-			pDevCtrl->rxRingDiscCnt[i] = discard_cnt;
+			pDevCtrl->rxRingDiscCnt[i] += discard_cnt;
+			rDma_ring->rdma_producer_index = 0;
 		}
 
 		/*
@@ -2077,6 +2092,7 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 	struct BcmEnet_devctrl *pDevCtrl = dev_id;
 	volatile struct intrl2Regs *intrl2 = pDevCtrl->intrl2_1;
 	unsigned int index;
+	unsigned long flags;
 
 	/* Save irq status for bottom-half processing. */
 	pDevCtrl->irq1_stat = intrl2->cpu_stat & ~intrl2->cpu_mask_status;
@@ -2090,10 +2106,17 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 	 */
 	if (pDevCtrl->irq1_stat & 0x0000ffff) {
 		index = 0;
-		for (index = 0; index < 16; index++) {
-			if (pDevCtrl->irq1_stat & (1<<index))
+		spin_lock_irqsave(&pDevCtrl->lock, flags);
+		for (index = 0; index < GENET_TX_RING_COUNT; index++) {
+			if (pDevCtrl->irq1_stat & (1 << index)) {
 				bcmgenet_tx_reclaim(pDevCtrl->dev, index);
+				if (index >= GENET_TX_MQ_CNT) {
+					pr_warn_ratelimited("bcmgenet_isr1 TX index %d >= %d",
+					  index, GENET_TX_MQ_CNT);
+				}
+			}
 		}
+		spin_unlock_irqrestore(&pDevCtrl->lock, flags);
 	}
 
 	if (pDevCtrl->irq1_stat & 0xffff0000) {
@@ -2105,6 +2128,8 @@ static irqreturn_t bcmgenet_isr1(int irq, void *dev_id)
 		 */
 		if (likely(napi_schedule_prep(&pDevCtrl->ring_napi))) {
 			/* Disable all rx ring interrupt */
+			pr_warn_ratelimited("bcmgenet_isr1 ring_napi 0x%08x",
+				pDevCtrl->irq1_stat);
 			intrl2->cpu_mask_set |= 0xffff0000;
 			__napi_schedule(&pDevCtrl->ring_napi);
 		}
@@ -2185,7 +2210,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 	struct Enet_CB *cb;
 	struct sk_buff *skb;
 	unsigned long dmaFlag;
-	int len;
+	int len, discard_cnt = 0;
 	unsigned int rxpktprocessed = 0, rxpkttoprocess = 0;
 	unsigned int p_index = 0, c_index = 0, read_ptr = 0;
 	unsigned long start_addr, end_addr;
@@ -2201,12 +2226,17 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 	read_ptr = ((read_ptr & DMA_RW_POINTER_MASK) >> 1);
 	start_addr = rDma_desc->rdma_start_addr;
 	end_addr = rDma_desc->rdma_end_addr;
-
 	if (p_index < c_index)
 		rxpkttoprocess = (DMA_C_INDEX_MASK+1) - c_index + p_index;
 	else
 		rxpkttoprocess = p_index - c_index;
 	TRACE(("RDMA: rxpkttoprocess=%d\n", rxpkttoprocess));
+
+	discard_cnt = (rDma_desc->rdma_producer_index >> 16);
+	if (discard_cnt) {
+		pDevCtrl->rxRingDiscCnt[index] += discard_cnt;
+		rDma_desc->rdma_producer_index = 0;
+	}
 
 	while ((rxpktprocessed < rxpkttoprocess) &&
 			(rxpktprocessed < budget)) {
@@ -2244,6 +2274,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 			dev->stats.rx_dropped++;
 			dev->stats.rx_errors++;
 			dev_kfree_skb_any(cb->skb);
+			cb->skb = NULL;
 			continue;
 		}
 		/* report errors */
@@ -2348,7 +2379,8 @@ static int assign_rx_buffers(struct BcmEnet_devctrl *pDevCtrl)
 #else
 	spin_lock_irqsave(&pDevCtrl->lock, flags);
 #endif
-	bdsfilled = assign_rx_buffers_range(pDevCtrl, 0, 2*TOTAL_DESC - 1, 0);
+	bdsfilled = 
+		assign_rx_buffers_range(pDevCtrl, 0, 2 * TOTAL_DESC - 1, 0);
 
 #ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
 	spin_unlock_bh(&pDevCtrl->bh_lock);
@@ -2476,7 +2508,6 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 {
 	volatile struct uniMacRegs *umac;
 	volatile struct intrl2Regs *intrl2;
-	struct net_device *dev = pDevCtrl->dev;
 
 	umac = pDevCtrl->umac;
 	intrl2 = pDevCtrl->intrl2_0;
@@ -2508,12 +2539,9 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 	 */
 	if (pDevCtrl->bIPHdrOptimize)
 		pDevCtrl->rbuf->rbuf_ctrl |= RBUF_ALIGN_2B ;
-
-	umac->mac_0 = (dev->dev_addr[0] << 24 |
-			dev->dev_addr[1] << 16 |
-			dev->dev_addr[2] << 8  |
-			dev->dev_addr[3]);
-	umac->mac_1 = dev->dev_addr[4] << 8 | dev->dev_addr[5];
+#if CONFIG_BRCM_GENET_VERSION >= 3
+	pDevCtrl->rbuf->rbuf_tbuf_size_ctrl = 1;
+#endif
 
 	/* Mask all interrupts.*/
 	intrl2->cpu_mask_set = 0xFFFFFFFF;
@@ -2580,12 +2608,12 @@ static void init_edma(struct BcmEnet_devctrl *pDevCtrl)
 	rDma_desc->rdma_consumer_index = 0;
 	/* Initialize default queue. */
 	BUG_ON(GENET_RX_TOTAL_MQ_BD > TOTAL_DESC);
-	rDma_desc->rdma_ring_buf_size = ((GENET_DEFAULT_RX_BD_CNT <<
+	rDma_desc->rdma_ring_buf_size = ((GENET_RX_DEFAULT_BD_CNT <<
 				DMA_RING_SIZE_SHIFT) | RX_BUF_LENGTH);
-	rDma_desc->rdma_start_addr = 2*GENET_RX_TOTAL_MQ_BD;
-	rDma_desc->rdma_end_addr = 2*TOTAL_DESC - 1;
-	rDma_desc->rdma_read_pointer = 2*GENET_RX_TOTAL_MQ_BD;
-	rDma_desc->rdma_write_pointer = 2*GENET_RX_TOTAL_MQ_BD;
+	rDma_desc->rdma_start_addr = 2 * GENET_RX_TOTAL_MQ_BD;
+	rDma_desc->rdma_end_addr = 2 * TOTAL_DESC - 1;
+	rDma_desc->rdma_read_pointer = 2 * GENET_RX_TOTAL_MQ_BD;
+	rDma_desc->rdma_write_pointer = 2 * GENET_RX_TOTAL_MQ_BD;
 	rDma_desc->rdma_xon_xoff_threshold = ((DMA_FC_THRESH_LO
 			<< DMA_XOFF_THRESHOLD_SHIFT) |
 			DMA_FC_THRESH_HI);
@@ -2616,16 +2644,19 @@ static void init_edma(struct BcmEnet_devctrl *pDevCtrl)
 	tDma_desc->tdma_flow_period = 0;
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
 	/* Unclassified traffic goes to ring 16 */
-	tDma_desc->tdma_ring_buf_size = ((GENET_DEFAULT_BD_CNT <<
+	tDma_desc->tdma_ring_buf_size = ((GENET_TX_DEFAULT_BD_CNT <<
 				DMA_RING_SIZE_SHIFT) | RX_BUF_LENGTH);
-	tDma_desc->tdma_start_addr = 2*(GENET_MQ_CNT*GENET_MQ_BD_CNT);
-	tDma_desc->tdma_end_addr = 2*TOTAL_DESC - 1;
-	tDma_desc->tdma_read_pointer = 2*(GENET_MQ_CNT*GENET_MQ_BD_CNT);
-	tDma_desc->tdma_write_pointer = 2*(GENET_MQ_CNT*GENET_MQ_BD_CNT);
-	pDevCtrl->txFreeBds = GENET_DEFAULT_BD_CNT;
-	/* initiaize multi xmit queue */
-	bcmgenet_init_multiq(pDevCtrl->dev);
+	tDma_desc->tdma_start_addr = 
+		2 * GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT;
+	tDma_desc->tdma_end_addr = 2 * TOTAL_DESC - 1;
+	tDma_desc->tdma_read_pointer = 
+		2 * GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT;
+	tDma_desc->tdma_write_pointer = 
+		2 * GENET_TX_MQ_CNT * GENET_TX_MQ_BD_CNT;
+	pDevCtrl->txFreeBds = GENET_TX_DEFAULT_BD_CNT;
 
+	/* Initiaize priority tx queues */
+	bcmgenet_init_multiq_tx(pDevCtrl->dev);
 	/* Initialize priority rx queues. */
 	bcmgenet_init_multiq_rx(pDevCtrl->dev);
 
@@ -2633,7 +2664,7 @@ static void init_edma(struct BcmEnet_devctrl *pDevCtrl)
 	tDma_desc->tdma_ring_buf_size = ((TOTAL_DESC << DMA_RING_SIZE_SHIFT) |
 			RX_BUF_LENGTH);
 	tDma_desc->tdma_start_addr = 0;
-	tDma_desc->tdma_end_addr = 2*TOTAL_DESC - 1;
+	tDma_desc->tdma_end_addr = 2 * TOTAL_DESC - 1;
 	tDma_desc->tdma_read_pointer = 0;
 	tDma_desc->tdma_write_pointer = 0;
 #endif
@@ -2730,7 +2761,8 @@ int bcmgenet_init_ringbuf(struct net_device *dev, int direction,
 
 		/* Enable interrupt for this ring */
 		pDevCtrl->intrl2_1->cpu_mask_clear |= (1 << (id + 16));
-		pDevCtrl->rxDma->rdma_ctrl |= (1<<(id+DMA_RING_BUF_EN_SHIFT));
+		pDevCtrl->rxDma->rdma_ctrl |= 
+			(1 << (id + DMA_RING_BUF_EN_SHIFT));
 		if (!(pDevCtrl->rbuf->rbuf_ctrl & RBUF_64B_EN))
 			pDevCtrl->rbuf->rbuf_ctrl |= RBUF_64B_EN;
 		if (dma_enable)
@@ -2756,8 +2788,8 @@ int bcmgenet_init_ringbuf(struct net_device *dev, int direction,
 				DMA_TO_DEVICE);
 		for (i = 0; i < size; i++) {
 			cb->skb = NULL;
-			cb->BdAddr = (struct DmaDesc *)(*buf + i*buf_len);
-			cb->dma_addr = dma_start + i*buf_len;
+			cb->BdAddr = (struct DmaDesc *)(*buf + i * buf_len);
+			cb->dma_addr = dma_start + i * buf_len;
 			cb++;
 		}
 		tDmaRing->tdma_start_addr = dma_start;
@@ -2921,16 +2953,16 @@ static void bcmgenet_init_multiq_rx(struct net_device *dev)
 	if (dma_enable)
 		pDevCtrl->rxDma->rdma_ctrl |= DMA_EN;
 }
+
 /*
  * init multi xmit queues, only available for GENET2
  * the queue is partitioned as follows:
- *
- * queue 0 - 3 is priority based, each one has 48 descriptors,
- * with queue 0 being the highest priority queue.
- *
- * queue 16 is the default tx queue, with 64 descriptors.
+ * - there are GENET_TX_MQ_CNT priority queues, each having GENET_TX_MQ_BD_CNT
+ *   descriptors, with queue 0 being the highest priority queue.
+ * - queue 16 is the default tx queue, that has GENET_TX_DEFAULT_BD_CNT
+ * descriptors.
  */
-static void bcmgenet_init_multiq(struct net_device *dev)
+static void bcmgenet_init_multiq_tx(struct net_device *dev)
 {
 	int i, dma_enable;
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
@@ -2939,41 +2971,43 @@ static void bcmgenet_init_multiq(struct net_device *dev)
 	pDevCtrl->txDma->tdma_ctrl &= ~DMA_EN;
 	/* Enable strict priority arbiter mode */
 	pDevCtrl->txDma->tdma_arb_ctrl = 0x2;
-	for (i = 0; i < GENET_MQ_CNT; i++) {
-		/* first 64 txCbs are reserved for default tx queue (ring 16) */
+	for (i = 0; i < GENET_TX_MQ_CNT; i++) {
+		/* first GENET_TX_DEFAULT_BD_CNT are reserved for 
+		 * default tx queue (ring 16) */
 		pDevCtrl->txRingCBs[i] = pDevCtrl->txCbs +
-			GENET_DEFAULT_BD_CNT + i * GENET_MQ_BD_CNT;
-		pDevCtrl->txRingSize[i] = GENET_MQ_BD_CNT;
+			GENET_TX_DEFAULT_BD_CNT + i * GENET_TX_MQ_BD_CNT;
+		pDevCtrl->txRingSize[i] = GENET_TX_MQ_BD_CNT;
 		pDevCtrl->txRingCIndex[i] = 0;
-		pDevCtrl->txRingFreeBds[i] = GENET_MQ_BD_CNT;
+		pDevCtrl->txRingFreeBds[i] = GENET_TX_MQ_BD_CNT;
 
 		pDevCtrl->txDma->tDmaRings[i].tdma_producer_index = 0;
 		pDevCtrl->txDma->tDmaRings[i].tdma_consumer_index = 0;
 		pDevCtrl->txDma->tDmaRings[i].tdma_ring_buf_size =
-			(GENET_MQ_BD_CNT << DMA_RING_SIZE_SHIFT) |
+			(GENET_TX_MQ_BD_CNT << DMA_RING_SIZE_SHIFT) |
 			RX_BUF_LENGTH;
 		pDevCtrl->txDma->tDmaRings[i].tdma_start_addr =
-			2 * i * GENET_MQ_BD_CNT;
+			2 * i * GENET_TX_MQ_BD_CNT;
 		pDevCtrl->txDma->tDmaRings[i].tdma_end_addr =
-			2 * (i + 1)*GENET_MQ_BD_CNT - 1;
+			2 * (i + 1) * GENET_TX_MQ_BD_CNT - 1;
 		pDevCtrl->txDma->tDmaRings[i].tdma_flow_period =
 			ENET_MAX_MTU_SIZE << 16;
 		pDevCtrl->txDma->tDmaRings[i].tdma_mbuf_done_threshold = 1;
 		pDevCtrl->txDma->tDmaRings[i].tdma_write_pointer =
-			2 * i * GENET_MQ_BD_CNT;
+			2 * i * GENET_TX_MQ_BD_CNT;
 		pDevCtrl->txDma->tDmaRings[i].tdma_read_pointer =
-			2 * i * GENET_MQ_BD_CNT;
+			2 * i * GENET_TX_MQ_BD_CNT;
 
-		/* Configure ring as decriptor ring and setup priority */
+		/* Configure ring as descriptor ring and setup priority */
 		pDevCtrl->txDma->tdma_ring_cfg |= (1 << i);
 		pDevCtrl->txDma->tdma_priority[0] |=
-			((GENET_Q0_PRIORITY + i) << 5*i);
+			((GENET_TX_Q0_PRIORITY + i) << 5*i);
 		pDevCtrl->txDma->tdma_ctrl |=
 			(1 << (i + DMA_RING_BUF_EN_SHIFT));
 	}
+
 	/* Set ring #16 priority */
 	pDevCtrl->txDma->tdma_priority[2] |=
-		((GENET_Q0_PRIORITY + GENET_MQ_CNT) << 20);
+		((GENET_TX_Q0_PRIORITY + GENET_TX_MQ_CNT) << 20);
 	if (dma_enable)
 		pDevCtrl->txDma->tdma_ctrl |= DMA_EN;
 }
@@ -3082,13 +3116,15 @@ static int bcmgenet_init_dev(struct BcmEnet_devctrl *pDevCtrl)
 	init_edma(pDevCtrl);
 
 #if (CONFIG_BRCM_GENET_VERSION > 1) && defined(CONFIG_NET_SCH_MULTIQ)
-	pDevCtrl->nrTxBds = GENET_DEFAULT_BD_CNT;
+	pDevCtrl->nrTxBds = GENET_TX_DEFAULT_BD_CNT;
 #endif
 
 	TRACE(("%s done!\n", __func__));
-
 	/* Enable HFB filtering. */
-	bcmgenet_enable_hfb_for_pcp(pDevCtrl);
+	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA)
+		bcmgenet_enable_pcp_hfb(pDevCtrl);
+	else
+		bcmgenet_enable_multicast_hfb(pDevCtrl);
 
 	/* if we reach this point, we've init'ed successfully */
 	return 0;
@@ -3109,7 +3145,8 @@ static void bcmgenet_uninit_dev(struct BcmEnet_devctrl *pDevCtrl)
 
 	if (pDevCtrl) {
 		/* Disable HFB filtering. */
-		bcmgenet_disable_hfb_for_pcp(pDevCtrl);
+		if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA)
+			bcmgenet_disable_pcp_hfb(pDevCtrl);
 
 		/* disable DMA */
 		pDevCtrl->rxDma->rdma_ctrl = 0;
@@ -3181,9 +3218,28 @@ do { \
 #endif
 
 /*
+ * Enable IPv4 Multicast filtering in HFB.
+ */
+static int bcmgenet_enable_multicast_hfb(struct BcmEnet_devctrl *pDevCtrl)
+{
+	struct net_device *dev = pDevCtrl->dev;
+	int filter;
+
+	filter = bcmgenet_update_hfb(dev,
+		hfb_ipv4_multicast, ARRAY_SIZE(hfb_ipv4_multicast), 0);
+	if (filter < 0) {
+		printk(KERN_ERR "%s: Unable to update multicast HFB\n",
+		       __func__);
+		return -1;
+	}
+	GENET_HFB_CTRL(pDevCtrl) |= RBUF_HFB_EN;
+	return 0;
+}
+
+/*
  * Enable PCP (Priority Code Point) filtering in HFB.
  */
-void bcmgenet_enable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl)
+void bcmgenet_enable_pcp_hfb(struct BcmEnet_devctrl *pDevCtrl)
 {
 	int filter;
 	int filter_size; /* filter size in unsigned long */
@@ -3212,7 +3268,7 @@ void bcmgenet_enable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl)
 		 * Simple move the address pointer. The format of each filter
 		 * is of the following format:
 		 *
-		 * 31        23     15     7     0
+		 * 31	23     15     7     0
 		 * -------------------------------
 		 * | unused | Mask |  B0  |  B1  |
 		 * -------------------------------
@@ -3233,7 +3289,7 @@ void bcmgenet_enable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl)
 	GENET_HFB_CTRL(pDevCtrl) |= RBUF_HFB_EN;
 }
 
-void bcmgenet_disable_hfb_for_pcp(struct BcmEnet_devctrl *pDevCtrl)
+void bcmgenet_disable_pcp_hfb(struct BcmEnet_devctrl *pDevCtrl)
 {
 	int filter_size = (GENET_HFB_CTRL(pDevCtrl) & RBUF_HFB_256B) ? 128 : 64;
 	int filter;
@@ -3437,7 +3493,7 @@ static void bcmgenet_get_wol(struct net_device *dev,
 	volatile struct uniMacRegs *umac = pDevCtrl->umac;
 	wol->supported = WAKE_MAGIC | WAKE_MAGICSECURE | WAKE_ARP;
 
-	if (!pDevCtrl->dev_opened)
+	if (!netif_running(dev))
 		return;
 
 	wol->wolopts = pDevCtrl->wolopts;
@@ -3485,15 +3541,15 @@ static int bcmgenet_get_settings(struct net_device *dev,
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 	int rc = 0;
 
-	if (!netif_running(dev))
-		return -EINVAL;
-	/* override autoneg on MoCA interface to return link up/down */
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
+		/* see comments in bcmgenet_set_settings() */
 		cmd->autoneg = netif_carrier_ok(pDevCtrl->dev);
 		cmd->speed = SPEED_1000;
 		cmd->duplex = DUPLEX_HALF;
 		cmd->port = PORT_BNC;
 	} else {
+		if (!netif_running(dev))
+			return -EINVAL;
 		rc = mii_ethtool_gset(&pDevCtrl->mii, cmd);
 	}
 
@@ -3508,19 +3564,16 @@ static int bcmgenet_set_settings(struct net_device *dev,
 	int err = 0;
 	struct BcmEnet_devctrl *pDevCtrl = netdev_priv(dev);
 
-	if (!netif_running(dev))
-		return -EINVAL;
-	/* override autoneg on MoCA interface to set link up/down */
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA) {
-		if ((cmd->autoneg == 0) && (netif_carrier_ok(pDevCtrl->dev))) {
-			pDevCtrl->dev->flags &= ~IFF_RUNNING;
-			netif_carrier_off(pDevCtrl->dev);
-		}
-		if ((cmd->autoneg != 0) && (!netif_carrier_ok(pDevCtrl->dev))) {
-			pDevCtrl->dev->flags |= IFF_RUNNING;
+		/* mocad uses cmd->autoneg to control our RUNNING flag */
+		if (cmd->autoneg)
 			netif_carrier_on(pDevCtrl->dev);
-		}
+		else
+			netif_carrier_off(pDevCtrl->dev);
 	} else {
+		if (!netif_running(dev))
+			return -EINVAL;
+
 		err = mii_ethtool_sset(&pDevCtrl->mii, cmd);
 		if (err < 0)
 			return err;
@@ -3765,8 +3818,9 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 		if (pDevCtrl->ext) {
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PWR_DN_EN_LD;
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PHY_RESET;
-			udelay(5);
+			udelay(1);
 			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_PHY_RESET;
+			udelay(100);
 		}
 		/* enable 64 clock MDIO */
 		pDevCtrl->mii.mdio_write(pDevCtrl->dev, pDevCtrl->phyAddr, 0x1d,
@@ -3797,8 +3851,9 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 			/* enable APD */
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PWR_DN_EN_LD;
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PHY_RESET;
-			udelay(5);
+			udelay(1);
 			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_PHY_RESET;
+			udelay(100);
 		}
 		/* enable 64 clock MDIO */
 		pDevCtrl->mii.mdio_write(pDevCtrl->dev, pDevCtrl->phyAddr, 0x1d,
@@ -3812,6 +3867,7 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 		bcm7429_ephy_workaround(pDevCtrl);
 #endif
 }
+
 /*
  * ioctl handle special commands that are not present in ethtool.
  */
@@ -3877,32 +3933,56 @@ static const struct net_device_ops bcmgenet_netdev_ops = {
  * including: bcmgenet multi-queue rx/tx budget size, multi-queue count, etc.
  * Read-only for now.
  */
-static int bcmgenet_debugfs_create(void)
+static int bcmgenet_debugfs_create(struct BcmEnet_devctrl *dev)
 {
 	/* define debugfs file name and dentry */
-	const char *fname;
-	struct dentry *dfs_rootdir;
+	struct dentry *interface_dir;
 	int err = -EIO, i;
+	char path[16];
+
 	/* init debugfs file name and variable*/
 	bcmgenet_debugfs dbfs[] = {
+#ifdef CONFIG_NET_SCH_MULTIQ
 					BCMGENET_DEBUGFS(bcmgenet_rx_mq_bd_cnt),
 					BCMGENET_DEBUGFS(bcmgenet_tx_mq_bd_cnt),
+					BCMGENET_DEBUGFS(bcmgenet_tx_mq_cnt),
+#endif
 					BCMGENET_DEBUGFS(bcmgenet_tx_default_bd_cnt),
-					BCMGENET_DEBUGFS(bcmgenet_tx_mq_cnt)
 	};
 
-	/* create debugfs directory */
-	fname = "bcmgenet";
-	dfs_rootdir = debugfs_create_dir(fname, NULL);
-	if (IS_ERR_OR_NULL(dfs_rootdir)) {
-		err = dfs_rootdir ? PTR_ERR(dfs_rootdir) : -ENODEV;
-		printk(KERN_ERR "%s: can't create debugfs directory\n", __func__);
+	if (!bcmgenet_debugfs_root) {
+		/* create debugfs root directory */
+		bcmgenet_debugfs_root = debugfs_create_dir("bcmgenet", NULL);
+		if (IS_ERR_OR_NULL(bcmgenet_debugfs_root)) {
+			err = bcmgenet_debugfs_root ?
+				PTR_ERR(bcmgenet_debugfs_root) : -ENODEV;
+			printk(KERN_ERR "%s: can't create debugfs directory\n",
+			       __func__);
+			return err;
+		}
+		/* create debugfs files */
+		for(i = 0; i < ARRAY_SIZE(dbfs); i++) {
+			err = bcmgenet_debugfs_create_u32(dbfs[i], S_IRUGO,
+							  bcmgenet_debugfs_root);
+			if(err)
+				return err;
+		}
+	}
+
+	snprintf(path, sizeof(path), "eth%d", dev->devnum);
+	interface_dir = debugfs_create_dir(path, bcmgenet_debugfs_root);
+
+	if (IS_ERR_OR_NULL(interface_dir)) {
+		err = interface_dir ? PTR_ERR(interface_dir) : -ENODEV;
+		printk(KERN_ERR "%s: can't create debugfs "
+		      "interface directory\n", __func__);
 		return err;
 	}
 
-	/* create debugfs files */
-	for(i = 0; i < sizeof(dbfs)/sizeof(dbfs[0]); i++) {
-		err = bcmgenet_debugfs_create_u32(dbfs[i], S_IRUGO, dfs_rootdir);
+	for (i = 0; i < GENET_RX_RING_COUNT; i++) {
+		err = bcmgenet_debugfs_create_indexed_u32(&(dev->rxRingDiscCnt[i]),
+							  i, S_IRUGO,
+							  interface_dir);
 		if(err)
 			return err;
 	}
@@ -3911,12 +3991,33 @@ static int bcmgenet_debugfs_create(void)
 }
 
 /* This function creates debugfs file for u32 kernel variable. */
-static int bcmgenet_debugfs_create_u32(bcmgenet_debugfs bcmgenet_dbfs, int op, struct dentry *rtdir)
+static int bcmgenet_debugfs_create_u32(bcmgenet_debugfs bcmgenet_dbfs, 
+				       int op, struct dentry *rtdir)
 {
 	struct dentry *dent;
 	int err = -EIO;
 
-	dent = debugfs_create_u32(bcmgenet_dbfs.dbfs_name, op, rtdir, bcmgenet_dbfs.dbfs_p);
+	dent = debugfs_create_u32(bcmgenet_dbfs.dbfs_name, op, rtdir,
+                                  bcmgenet_dbfs.dbfs_p);
+	if (IS_ERR_OR_NULL(dent)){
+		err = dent ? PTR_ERR(dent) : -ENODEV;
+		printk(KERN_ERR "%s: can't create debugfs file\n", __func__);
+		return err;
+	}
+
+	return 0;
+}
+
+static int bcmgenet_debugfs_create_indexed_u32(unsigned int *var, int index,
+					       int op, struct dentry *rtdir)
+{
+	struct dentry *dent;
+	int err = -EIO;
+	char name[32];
+
+	snprintf(name, sizeof(name), "bcmgenet_discard_cnt_q%d", index);
+
+	dent = debugfs_create_u32(name, op, rtdir, var);
 	if (IS_ERR_OR_NULL(dent)){
 		err = dent ? PTR_ERR(dent) : -ENODEV;
 		printk(KERN_ERR "%s: can't create debugfs file\n", __func__);
@@ -3932,6 +4033,7 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 	void __iomem *base;
 	unsigned long res_size;
 	int err = -EIO;
+
 	/*
 	 * bcmemac and bcmgenet use same platform data structure.
 	 */
@@ -3939,12 +4041,9 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 	struct BcmEnet_devctrl *pDevCtrl;
 	struct net_device *dev;
 
-	/* create bebugfs for bcmgenet multi-queue*/
-	if (bcmgenet_debugfs_create())
-		printk(KERN_ERR "%s: debugfs creation fail.\n", __func__);
-
 	mres = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	ires = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+
 	if (!mres || !ires) {
 		printk(KERN_ERR "%s: can't get resources\n", __func__);
 		return -EIO;
@@ -3964,7 +4063,7 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_NET_SCH_MULTIQ
-	dev = alloc_etherdev_mq(sizeof(*(pDevCtrl)), GENET_MQ_CNT+1);
+	dev = alloc_etherdev_mq(sizeof(*(pDevCtrl)), GENET_TX_MQ_CNT + 1);
 #else
 	dev = alloc_etherdev(sizeof(*pDevCtrl));
 #endif
@@ -3973,13 +4072,21 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 		err = -ENOMEM;
 		goto err0;
 	}
+
 	dev->base_addr = (unsigned long)base;
 	pDevCtrl = (struct BcmEnet_devctrl *)netdev_priv(dev);
+	pDevCtrl->phyType = cfg->phy_type;
+	pDevCtrl->devnum = pdev->id;
+
+	/* create debugfs for bcmgenet multi-queue*/
+	if (bcmgenet_debugfs_create(pDevCtrl))
+		printk(KERN_ERR "%s: debugfs creation fail.\n", __func__);
+
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	dev_set_drvdata(&pdev->dev, pDevCtrl);
 	memcpy(dev->dev_addr, cfg->macaddr, 6);
 	dev->irq = pDevCtrl->irq0;
-	dev->watchdog_timeo         = 2*HZ;
+	dev->watchdog_timeo = 2 * HZ;
 	SET_ETHTOOL_OPS(dev, &bcmgenet_ethtool_ops);
 	dev->netdev_ops = &bcmgenet_netdev_ops;
 	netif_napi_add(dev, &pDevCtrl->napi, bcmgenet_poll, 64);
@@ -3990,7 +4097,7 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 	pDevCtrl->dev = dev;
 	pDevCtrl->irq0 = platform_get_irq(pdev, 0);
 	pDevCtrl->irq1 = platform_get_irq(pdev, 1);
-	pDevCtrl->devnum = pdev->id;
+
 	/* NOTE: with fast-bridge , must turn this off! */
 	pDevCtrl->bIPHdrOptimize = 1;
 
@@ -4000,7 +4107,6 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 	/* Mii wait queue */
 	init_waitqueue_head(&pDevCtrl->wq);
 
-	pDevCtrl->phyType = cfg->phy_type;
 	pDevCtrl->pdev = pdev;
 
 	/* Init GENET registers, Tx/Rx buffers */
@@ -4083,15 +4189,15 @@ static int bcmgenet_drv_suspend(struct device *dev)
 	struct BcmEnet_devctrl *pDevCtrl = dev_get_drvdata(dev);
 
 	cancel_work_sync(&pDevCtrl->bcmgenet_irq_work);
+
+	/*
+	 * Save/restore the interface status across PM modes.
+	 * FIXME: Don't use open/close for suspend/resume.
+	 */
+	pDevCtrl->dev_opened = netif_running(pDevCtrl->dev);
 	if (pDevCtrl->dev_opened && !pDevCtrl->dev_asleep) {
 		pDevCtrl->dev_asleep = 1;
 		val = bcmgenet_close(pDevCtrl->dev);
-		/*
-		 * After close call, dev_opened flag will be 0,
-		 * we need to remember what was the state before
-		 * going into suspend mode.
-		 */
-		pDevCtrl->dev_opened = 1;
 	}
 
 	return val;
