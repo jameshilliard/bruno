@@ -129,6 +129,8 @@ struct BcmEnet_devctrl {
 
 	struct work_struct bcmgenet_irq_work;	/* bottom half work */
 	struct work_struct bcmgenet_link_work;	/* GPHY link status work */
+	struct workqueue_struct *lowpriority_rx_wq;
+	struct work_struct bcmgenet_lowpriority_rx_work;
 	int    devnum;		/* 0=EMAC_0, 1=EMAC_1 */
 	struct clk *clk;
 	int dev_opened;		/* device opened. */

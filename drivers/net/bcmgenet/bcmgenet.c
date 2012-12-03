@@ -112,9 +112,7 @@ static void bcmgenet_init_multiq_rx(struct net_device *dev);
 #define DMA_DESC_THRES		4
 #define HFB_ARP_LEN			21
 
-/* NAPI budget for the default queue (queue 16) */
 #define	DEFAULT_DESC_BUDGET		GENET_RX_DEFAULT_BD_CNT
-#define	THROTTLED_DESC_BUDGET		2
 
 /*
  * Length in bytes that we will match in the filter for 802.1Q packets
@@ -215,7 +213,8 @@ static int bcmgenet_ring_poll(struct napi_struct *napi, int budget);
 /* --------------------------------------------------------------------------
 Process recived packet for descriptor based DMA
 --------------------------------------------------------------------------*/
-static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index);
+static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget,
+		int index, int check_softirq_resched);
 /* --------------------------------------------------------------------------
 Process recived packet for ring buffer DMA
 --------------------------------------------------------------------------*/
@@ -265,9 +264,6 @@ static int bcmgenet_update_hfb(struct net_device *dev, unsigned int *data,
 
 static struct net_device *eth_root_dev;
 static int DmaDescThres = DMA_DESC_THRES;
-
-/* Descriptor queue budget. */
-static int desc_budget = DEFAULT_DESC_BUDGET;
 
 /* bcmgenet multi-queue budget count variables for debugfs*/
 
@@ -840,6 +836,8 @@ static int bcmgenet_close(struct net_device *dev)
 	 * will be scheduled.
 	 */
 	cancel_work_sync(&pDevCtrl->bcmgenet_irq_work);
+
+	cancel_work_sync(&pDevCtrl->bcmgenet_lowpriority_rx_work);
 
 	if (brcm_pm_deep_sleep())
 		save_state(pDevCtrl);
@@ -1755,42 +1753,31 @@ static int bcmgenet_poll(struct napi_struct *napi, int budget)
 	volatile struct intrl2Regs *intrl2 = pDevCtrl->intrl2_0;
 	volatile struct rDmaRingRegs *rDma_desc;
 	unsigned int work_done, total_work_done = 0;
-	int local_budget;
 	int i;
 
-	/* Process the priority queues. */
-	for (i = 0, local_budget = GENET_RX_MQ_BD_CNT;
-		i < GENET_RX_MQ_CNT || i == DESC_INDEX;) {
-		work_done = bcmgenet_desc_rx(pDevCtrl, local_budget, i);
+	/* Process only the priority queues. */
+	for (i = 0; i < GENET_RX_MQ_CNT; i++) {
+		work_done = bcmgenet_desc_rx(pDevCtrl, budget, i, false);
 		rDma_desc = &pDevCtrl->rxDma->rDmaRings[i];
 		rDma_desc->rdma_consumer_index += work_done;
 		total_work_done += work_done;
-		if (i == GENET_RX_MQ_CNT - 1) {
-			/* Process the default queue. */
-			i = DESC_INDEX;
-			local_budget = desc_budget;
-		} else {
-			i++;
-		}
+		budget -= work_done;
 	}
 
-	/*
-	 * Per NAPI spec at
-	 *
-	 * http://www.linuxfoundation.org/collaborate/workgroups/networking/napi
-	 *
-	 * If packets remain to be processed (i.e. the driver used its entire
-	 * quota), poll() should return a value of one.
-	 * If, instead, all packets have been processed, your driver should
-	 * reenable interrupts, turn off polling, and return zero.
-	 */
-	if (total_work_done < budget) {
+	/* If we have not used the entire budget, then take us off the list of
+	 * devices to poll and re-enable interrupts. On the other hand, if we
+	 * did consume the entire budget, then we must not modify the NAPI
+	 * state.  See net/core/dev.c:net_rx_action(). */
+	if (budget > 0) {
 		napi_complete(napi);
-		intrl2->cpu_mask_clear |= UMAC_IRQ_HFB_OR_DONE;
-		return 0;
-	} else {
-		return 1;
+		intrl2->cpu_mask_clear |= (UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM);
 	}
+	/* Return the "weight" we consumed.
+	 * The NAPI spec at
+	 * http://www.linuxfoundation.org/collaborate/workgroups/networking/napi
+	 * says something else because it is outdated.
+	 */
+	return total_work_done;
 }
 /*
  * NAPI polling for ring buffer.
@@ -1812,6 +1799,63 @@ static int bcmgenet_ring_poll(struct napi_struct *napi, int budget)
 		intrl2->cpu_mask_clear |= bits;
 	}
 	return work_done;
+}
+/*
+ * Process low priority packets.
+ */
+static void bcmgenet_lowpriority_rx_task(struct work_struct *work)
+{
+	struct BcmEnet_devctrl *pDevCtrl = container_of(work,
+			struct BcmEnet_devctrl, bcmgenet_lowpriority_rx_work);
+	volatile struct intrl2Regs *intrl2 = pDevCtrl->intrl2_0;
+	volatile struct rDmaRingRegs *rDma_desc;
+	unsigned int work_done = 0;
+	unsigned int total_work_done = 0;
+	/* Limit the number of packets processed in one run of the work item.
+	 * */
+	int budget = DEFAULT_DESC_BUDGET;
+	int i = DESC_INDEX;
+
+	/* Disable softirqs. This also disables pre-emption which is why we
+	 * need to be careful to not starve other processes. */
+	local_bh_disable();
+
+	do {
+		/* bcmgenet_desc_rx() returns prematurely if a softirq is
+		 * pending or if we have been asked to give up the CPU
+		 * (reschedule). */
+		work_done = bcmgenet_desc_rx(pDevCtrl, budget, i, true);
+		rDma_desc = &pDevCtrl->rxDma->rDmaRings[i];
+		rDma_desc->rdma_consumer_index += work_done;
+		total_work_done += work_done;
+		budget -= work_done;
+		/* If there is a softirq pending, then there is potentially a
+		 * high priority packet waiting to get processed.
+		 * local_bh_enable() runs all pending softirqs. */
+		if (local_softirq_pending()) {
+			local_bh_enable();
+			local_bh_disable();
+		}
+		/* Check if scheduler wants us to give up the CPU. Remember, we
+		 * disabled pre-emption so we need to be proactive in
+		 * re-scheduling.*/
+		cond_resched_softirq();
+	} while (budget > 0 && work_done);
+
+
+	if (budget) {
+		/* Re-enable buffer done (BDONE) and packet done (PDONE) interrupts. */
+		intrl2->cpu_mask_clear |=
+			(UMAC_IRQ_RXDMA_BDONE | UMAC_IRQ_RXDMA_PDONE);
+	} else {
+		/* If we ran out of budget, then it is likely that there are
+		 * more packets to process. Re-submit this work item. */
+		queue_work(pDevCtrl->lowpriority_rx_wq,
+				&pDevCtrl->bcmgenet_lowpriority_rx_work);
+	}
+
+	/* Re-enable softirqs */
+	local_bh_enable();
 }
 /*
  * Interrupt bottom half
@@ -2151,23 +2195,36 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
 
 	TRACE(("IRQ=0x%x\n", pDevCtrl->irq0_stat));
 
-	/* If there is tagged traffic, throttle untagged traffic. */
-	if (pDevCtrl->irq0_stat & (UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM))
-		desc_budget = THROTTLED_DESC_BUDGET;
-	else
-		desc_budget = DEFAULT_DESC_BUDGET;
-
 #ifndef CONFIG_BCMGENET_RX_DESC_THROTTLE
-	if (pDevCtrl->irq0_stat & UMAC_IRQ_HFB_OR_DONE) {
+	if (pDevCtrl->irq0_stat & (UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM)) {
 		/*
-		 * We use NAPI(software interrupt throttling, if
-		 * Rx Descriptor throttling is not used.
-		 * Disable interrupt, will be enabled in the poll method.
+		 * If we receive an interrupt from the Hardware Filter Block
+		 * (HFB), we assume it is a high priority packet and use the
+		 * regular NAPI infrastructure to process it. (Our NAPI poll
+		 * method is called from NET_RX_SOFTIRQ)
 		 */
 		if (likely(napi_schedule_prep(&pDevCtrl->napi))) {
-			intrl2->cpu_mask_set |= UMAC_IRQ_HFB_OR_DONE;
+			/*
+			 * Disable interrupt, will be re-enabled in the NAPI
+			 * poll method.
+			 */
+			intrl2->cpu_mask_set |= (UMAC_IRQ_HFB_SM | UMAC_IRQ_HFB_MM);
+			/* napi_schedule will indirectly raise a softirq which
+			 * interrupts the processing of low priority packets to
+			 * make the CPU available for high priority packts. */
 			__napi_schedule(&pDevCtrl->napi);
 		}
+	}
+	if (pDevCtrl->irq0_stat & (UMAC_IRQ_RXDMA_BDONE | UMAC_IRQ_RXDMA_PDONE)) {
+		/*
+		 * Process low (normal) priority packets in a work queue i.e.
+		 * in kernel process context. Disable buffer done (BDONE) and
+		 * packet done (PDONE) interrupts here. They will be re-enabled
+		 * by the work item when it is done.
+		 */
+		intrl2->cpu_mask_set |= (UMAC_IRQ_RXDMA_BDONE | UMAC_IRQ_RXDMA_PDONE);
+		queue_work(pDevCtrl->lowpriority_rx_wq,
+				&pDevCtrl->bcmgenet_lowpriority_rx_work);
 	}
 #else
 	/* Multiple buffer done event. */
@@ -2179,7 +2236,7 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
 		pDevCtrl->irq0_stat &= ~UMAC_IRQ_RXDMA_MBDONE;
 		TRACE(("%s: %d packets available\n", __func__, DmaDescThres));
 		work_done = bcmgenet_desc_rx(pDevCtrl, DmaDescThres,
-			DESC_INDEX);
+			DESC_INDEX, false);
 		rDma_desc->rdma_consumer_index += work_done;
 	}
 #endif
@@ -2203,7 +2260,8 @@ static irqreturn_t bcmgenet_isr0(int irq, void *dev_id)
  *  bcmgenet_desc_rx - descriptor based rx process.
  *  this could be called from bottom half, or from NAPI polling method.
  */
-static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
+static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget,
+		int index, int check_softirq_resched)
 {
 	struct BcmEnet_devctrl *pDevCtrl = ptr;
 	struct net_device *dev = pDevCtrl->dev;
@@ -2266,7 +2324,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 		}
 
 		if (unlikely(!(dmaFlag & DMA_EOP) || !(dmaFlag & DMA_SOP))) {
-			printk(KERN_WARNING "Dropping fragmented packet: "
+			printk_ratelimited(KERN_WARNING "Dropping fragmented packet: "
 				"index=%d, p_index=%d c_index=%d "
 				"read_ptr=%d len_stat=0x%08lx\n",
 				index, p_index, c_index, read_ptr,
@@ -2347,6 +2405,10 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 #endif
 		cb->skb = NULL;
 		TRACE(("pushed up to kernel\n"));
+
+		if (check_softirq_resched && (local_softirq_pending() ||
+				need_resched()) )
+			break;
 	}
 
 	if (rxpktprocessed) {
@@ -4130,6 +4192,13 @@ static int bcmgenet_drv_probe(struct platform_device *pdev)
 	mii_init(dev);
 
 	INIT_WORK(&pDevCtrl->bcmgenet_irq_work, bcmgenet_irq_task);
+	INIT_WORK(&pDevCtrl->bcmgenet_lowpriority_rx_work,
+			bcmgenet_lowpriority_rx_task);
+	if (!(pDevCtrl->lowpriority_rx_wq = alloc_workqueue("bcmgenet_rx",
+					WQ_NON_REENTRANT|WQ_CPU_INTENSIVE, 1))) {
+		printk(KERN_ERR "alloc_workqueue failed.");
+		goto err2;
+	}
 	netif_carrier_off(pDevCtrl->dev);
 
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_EXT_MII ||
@@ -4175,6 +4244,7 @@ static int bcmgenet_drv_remove(struct platform_device *pdev)
 	struct BcmEnet_devctrl *pDevCtrl = dev_get_drvdata(&pdev->dev);
 
 	unregister_netdev(pDevCtrl->dev);
+	destroy_workqueue(pDevCtrl->lowpriority_rx_wq);
 	free_irq(pDevCtrl->irq0, pDevCtrl);
 	free_irq(pDevCtrl->irq1, pDevCtrl);
 	bcmgenet_uninit_dev(pDevCtrl);
