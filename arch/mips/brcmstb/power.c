@@ -751,7 +751,8 @@ static int __clk_enable(struct clk *clk, u32 flags)
 			__clk_enable(clk->parent, clk->flags | flags);
 		printk(KERN_DEBUG "%s: %s [%d]\n",
 			__func__, clk->name, clk->refcnt);
-		clk->enable(clk->flags | flags);
+		if (clk->enable)
+			clk->enable(clk->flags | flags);
 	}
 	return 0;
 }
@@ -761,7 +762,8 @@ static void __clk_disable(struct clk *clk, u32 flags)
 	if (--(clk->refcnt) == 0 && brcm_pm_enabled) {
 		printk(KERN_DEBUG "%s: %s [%d]\n",
 			__func__, clk->name, clk->refcnt);
-		clk->disable(clk->flags | flags);
+		if (clk->disable)
+			clk->disable(clk->flags | flags);
 		if (clk->parent)
 			__clk_disable(clk->parent, clk->flags | flags);
 	}
@@ -826,7 +828,7 @@ EXPORT_SYMBOL(clk_get_parent);
 int clk_set_rate(struct clk *clk, unsigned long rate)
 {
 	unsigned long flags;
-        int ret;
+	int ret=0;
 	spinlock_t *lock = &brcm_pm_clk_lock;
 	if (clk && !IS_ERR(clk) && clk->set_rate) {
 		spin_lock_irqsave(lock, flags);
@@ -3570,16 +3572,19 @@ static void brcm_pm_moca_enable(u32 flags)
 
 static int brcm_pm_moca_cpu_set_rate(unsigned long rate)
 {
+#ifdef BCHP_CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_0
 	BDEV_WR_F(CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_0,
 		MDIV_CH0, BRCM_BASE_CLK/(rate/1000000));
+#endif
 	return 0;
 }
 
 static int brcm_pm_moca_phy_set_rate(unsigned long rate)
 {
- 
+#ifdef BCHP_CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_1
 	BDEV_WR_F(CLKGEN_PLL_MOCA_PLL_CHANNEL_CTRL_CH_1,
 		MDIV_CH1, BRCM_BASE_CLK/(rate/1000000));
+#endif
 	return 0;
 }
 
