@@ -2051,8 +2051,6 @@ static int moca_probe(struct platform_device *pdev)
 	priv->start_time = jiffies;
 
 	priv->clk = clk_get(&pdev->dev, "moca");
-	priv->cpu_clk = clk_get(&pdev->dev, "moca-cpu");
-	priv->phy_clk = clk_get(&pdev->dev, "moca-phy");
 
 #if !defined(DSL_MOCA)
 	priv->cpu_clk = clk_get(&pdev->dev, "moca-cpu");
@@ -2388,10 +2386,6 @@ static struct platform_driver moca_plat_drv = {
 static int moca_init(void)
 {
 	int ret;
-#ifdef DSL_MOCA
-	unsigned char portInfo6829 = 0;
-	int retVal;
-#endif
 	memset(minor_tbl, 0, sizeof(minor_tbl));
 	ret = register_chrdev(MOCA_MAJOR, MOCA_CLASS, &moca_fops);
 	if (ret < 0) {
@@ -2405,9 +2399,6 @@ static int moca_init(void)
 		ret = PTR_ERR(moca_class);
 		goto bad2;
 	}
-#if MOCA6816
-	platform_device_register(&moca_plat_dev);
-#endif
 
 #ifdef DSL_MOCA
 	ret = moca_platform_dev_register();
@@ -2439,10 +2430,6 @@ bad:
 
 static void moca_exit(void)
 {
-#ifdef DSL_MOCA
-	unsigned char portInfo6829 = 0;
-	int retVal;
-#endif
 	class_destroy(moca_class);
 	unregister_chrdev(MOCA_MAJOR, MOCA_CLASS);
 	platform_driver_unregister(&moca_plat_drv);
@@ -2450,15 +2437,6 @@ static void moca_exit(void)
 	moca_platform_dev_unregister();
 #endif
 
-#ifdef DSL_MOCA
-	retVal = BpGet6829PortInfo(&portInfo6829);
-	if (retVal != BP_SUCCESS) {
-		printk(KERN_ERR "bmoca: can't read board params\n");
-		portInfo6829 = 0;
-	}
-	if (portInfo6829)
-		platform_device_unregister(&moca1_plat_dev);
-#endif
 }
 
 module_init(moca_init);
