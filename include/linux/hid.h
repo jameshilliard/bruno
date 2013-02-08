@@ -512,6 +512,8 @@ struct hid_device {							/* device report descriptor */
 	struct dentry *debug_dir;
 	struct dentry *debug_rdesc;
 	struct dentry *debug_events;
+	struct dentry *debug_battery;
+	__u32 debug_battery_level;
 	struct list_head debug_list;
 	wait_queue_head_t debug_wait;
 };

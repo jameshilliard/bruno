@@ -35,6 +35,7 @@ void hid_debug_unregister(struct hid_device *);
 void hid_debug_init(void);
 void hid_debug_exit(void);
 void hid_debug_event(struct hid_device *, char *);
+void hid_debug_battery_level(struct hid_device *, __u32);
 
 
 struct hid_debug_list {

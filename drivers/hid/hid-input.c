@@ -719,6 +719,11 @@ void hidinput_hid_event(struct hid_device *hid, struct hid_field *field, struct 
 	struct input_dev *input;
 	unsigned *quirks = &hid->quirks;
 
+	// Update remote battery level debugfs file
+	if ((usage->hid & HID_USAGE) == 0x20) {
+		// Battery level ranges between [0, 100]. Converting to u32 is safe.
+		hid_debug_battery_level(hid, (__u32)value);
+	}
 	if (!field->hidinput)
 		return;
 

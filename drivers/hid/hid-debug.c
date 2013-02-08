@@ -32,6 +32,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/poll.h>
+#include <linux/ratelimit.h>
 
 #include <linux/hid.h>
 #include <linux/hid-debug.h>
@@ -1064,6 +1065,11 @@ void hid_debug_register(struct hid_device *hdev, const char *name)
 			hdev->debug_dir, hdev, &hid_debug_rdesc_fops);
 	hdev->debug_events = debugfs_create_file("events", 0400,
 			hdev->debug_dir, hdev, &hid_debug_events_fops);
+	hdev->debug_battery = debugfs_create_u32("battery_level", 0400,
+			hdev->debug_dir, &hdev->debug_battery_level);
+	// Battery level ranges between [0, 100]. Set 999 as an invalid default value.
+	// It will be overwritten very soon by hid_debug_battery_level().
+	hdev->debug_battery_level = 999;
 	hdev->debug = 1;
 }
 
@@ -1071,6 +1077,7 @@ void hid_debug_unregister(struct hid_device *hdev)
 {
 	hdev->debug = 0;
 	wake_up_interruptible(&hdev->debug_wait);
+	debugfs_remove(hdev->debug_battery);
 	debugfs_remove(hdev->debug_rdesc);
 	debugfs_remove(hdev->debug_events);
 	debugfs_remove(hdev->debug_dir);
@@ -1086,3 +1093,18 @@ void hid_debug_exit(void)
 	debugfs_remove_recursive(hid_debug_root);
 }
 
+void hid_debug_battery_level(struct hid_device *hdev, __u32 level)
+{
+	if (level <= 0)
+	{
+		// Low battery indicator on remote starts flashing
+		printk_ratelimited(KERN_WARNING "Remote battery low.\n");
+	}
+	else if (level > hdev->debug_battery_level)
+	{
+		// Remote reconnection with higher bettery level.
+		printk_ratelimited(KERN_WARNING "Remote battery replaced. Battery level = %d\n",
+			   level);
+	}
+	hdev->debug_battery_level = level;
+}
