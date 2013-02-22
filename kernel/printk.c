@@ -431,8 +431,11 @@ int dmesg_restrict = 1;
 int dmesg_restrict;
 #endif
 
+#define COPY_SIZE 4096
+
 int do_syslog(int type, char __user *buf, int len, bool from_file)
 {
+	char *copybuf;
 	unsigned i, j, limit, count;
 	int do_clear = 0;
 	char c;
@@ -507,6 +510,11 @@ int do_syslog(int type, char __user *buf, int len, bool from_file)
 			error = -EFAULT;
 			goto out;
 		}
+		copybuf = kmalloc(COPY_SIZE, GFP_KERNEL);
+		if (!copybuf) {
+			error = -ENOMEM;
+			goto out;
+		}
 		count = len;
 		if (count > log_buf_len)
 			count = log_buf_len;
@@ -517,7 +525,7 @@ int do_syslog(int type, char __user *buf, int len, bool from_file)
 			logged_chars = 0;
 		limit = log_end;
 		/*
-		 * __put_user() could sleep, and while we sleep
+		 * copy_to_user() could sleep, and while we sleep
 		 * printk() could overwrite the messages
 		 * we try to copy to user space. Therefore
 		 * the messages are copied in reverse. <manfreds>
@@ -527,14 +535,26 @@ int do_syslog(int type, char __user *buf, int len, bool from_file)
 			if (j + log_buf_len < log_end)
 				break;
 			c = LOG_BUF(j);
-			spin_unlock_irq(&logbuf_lock);
-			error = __put_user(c,&buf[count-1-i]);
-			cond_resched();
-			spin_lock_irq(&logbuf_lock);
+			copybuf[COPY_SIZE-1-(i % COPY_SIZE)] = c;
+			if ((i+1) % COPY_SIZE == 0) {
+				spin_unlock_irq(&logbuf_lock);
+				error = copy_to_user(&buf[count-1-i],
+						copybuf, COPY_SIZE);
+				cond_resched();
+				spin_lock_irq(&logbuf_lock);
+			}
 		}
 		spin_unlock_irq(&logbuf_lock);
-		if (error)
-			break;
+		if (!error) {
+			/* in case copybuf was only partially filled */
+			error = copy_to_user(&buf[count-i],
+				copybuf + COPY_SIZE - (i % COPY_SIZE),
+				i % COPY_SIZE);
+		}
+		if (error) {
+			error = -EFAULT;
+			goto copy_done;
+		}
 		error = i;
 		if (i != count) {
 			int offset = count-error;
@@ -548,6 +568,8 @@ int do_syslog(int type, char __user *buf, int len, bool from_file)
 				cond_resched();
 			}
 		}
+copy_done:
+		kfree(copybuf);
 		break;
 	/* Clear ring buffer */
 	case SYSLOG_ACTION_CLEAR:
