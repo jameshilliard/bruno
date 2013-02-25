@@ -1039,12 +1039,6 @@ void __init bus_error_init(void)
 
 static void brcm_machine_restart(char *command)
 {
-/* PR21527 - Fix SMP reboot problem */
-#ifdef CONFIG_SMP
-	smp_send_stop();
-	udelay(10);
-#endif
-
 #ifdef BCHP_SUN_TOP_CTRL_SW_RESET
 	BDEV_WR_F_RB(SUN_TOP_CTRL_RESET_CTRL, master_reset_en, 1);
 	BDEV_WR_F_RB(SUN_TOP_CTRL_SW_RESET, chip_master_reset, 1);
