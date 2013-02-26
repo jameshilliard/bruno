@@ -65,9 +65,12 @@ NESTED(brcm_reset_nmi_vec, PT_SIZE, sp)
  	move	a0, sp
 
 	/* clear EXL, ERL, BEV so that TLB refills still work */
+	/* Also enable coprocessor 0, clear ST0_IE and
+	 * set KSU to 0 (kernel privilege level) */
 	mfc0	k0, CP0_STATUS
-	li	k1, ST0_ERL | ST0_EXL | ST0_BEV | ST0_IE
+	li	k1, ST0_CU0 | ST0_BEV | ST0_KSU | ST0_ERL | ST0_EXL | ST0_IE
 	or	k0, k1
+	li	k1, ST0_BEV | ST0_KSU | ST0_ERL | ST0_EXL | ST0_IE
 	xor	k0, k1
 	mtc0	k0, CP0_STATUS
 	BARRIER
