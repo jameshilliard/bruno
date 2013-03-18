@@ -238,6 +238,7 @@ static void watchdog_interrupt_count(void)
 static inline void watchdog_interrupt_count(void) { return; }
 #endif /* CONFIG_HARDLOCKUP_DETECTOR */
 
+extern void show_registers(struct pt_regs *regs);
 /* watchdog kicker functions */
 static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 {
@@ -285,7 +286,7 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 		print_modules();
 		print_irqtrace_events(current);
 		if (regs)
-			show_regs(regs);
+			show_registers(regs);
 		else
 			dump_stack();
 
