@@ -76,6 +76,7 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+	printk(KERN_EMERG "preempt_count: 0x%08x\n", preempt_count());
 	dump_stack();
 
 	/*
