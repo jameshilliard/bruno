@@ -353,6 +353,7 @@ void show_registers(struct pt_regs *regs)
 	printk("Process %s (pid: %d, threadinfo=%p, task=%p, tls=%0*lx)\n",
 	       current->comm, current->pid, current_thread_info(), current,
 	      field, current_thread_info()->tp_value);
+	printk("preempt_count: 0x%08x\n", preempt_count());
 	if (cpu_has_userlocal) {
 		unsigned long tls;
 
