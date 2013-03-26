@@ -1915,8 +1915,7 @@ static unsigned int bcmgenet_ring_rx(void *ptr, unsigned int budget)
 		if (rx_discard_flag) {
 			int discard_cnt = rDma_ring->rdma_producer_index >> 16;
 			/* Report rx overrun errors */
-			pDevCtrl->dev->stats.rx_over_errors += discard_cnt -
-				pDevCtrl->rxRingDiscCnt[i];
+			pDevCtrl->dev->stats.rx_over_errors += discard_cnt;
 			pDevCtrl->rxRingDiscCnt[i] += discard_cnt;
 			rDma_ring->rdma_producer_index = 0;
 		}
@@ -2012,7 +2011,7 @@ static unsigned int bcmgenet_ring_rx(void *ptr, unsigned int budget)
 				if (dmaFlag & DMA_RX_CRC_ERROR)
 					pDevCtrl->dev->stats.rx_crc_errors++;
 				if (dmaFlag & DMA_RX_OV)
-					pDevCtrl->dev->stats.rx_over_errors++;
+					pDevCtrl->dev->stats.rx_fifo_errors++;
 				if (dmaFlag & DMA_RX_NO)
 					pDevCtrl->dev->stats.rx_frame_errors++;
 				if (dmaFlag & DMA_RX_LG)
@@ -2234,6 +2233,8 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 
 	discard_cnt = (rDma_desc->rdma_producer_index >> 16);
 	if (discard_cnt) {
+		/* Report rx overrun errors */
+		pDevCtrl->dev->stats.rx_over_errors += discard_cnt;
 		pDevCtrl->rxRingDiscCnt[index] += discard_cnt;
 		rDma_desc->rdma_producer_index = 0;
 	}
@@ -2287,7 +2288,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 			if (dmaFlag & DMA_RX_CRC_ERROR)
 				dev->stats.rx_crc_errors++;
 			if (dmaFlag & DMA_RX_OV)
-				dev->stats.rx_over_errors++;
+				dev->stats.rx_fifo_errors++;
 			if (dmaFlag & DMA_RX_NO)
 				dev->stats.rx_frame_errors++;
 			if (dmaFlag & DMA_RX_LG)
