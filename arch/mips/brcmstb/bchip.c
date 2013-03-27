@@ -421,6 +421,13 @@ static void bchip_usb_init_one(int id, uintptr_t base)
 #if defined(CONFIG_BRCM_HAS_1GB_MEMC1)
 	/* enable access to SCB1 */
 	BDEV_SET(USB_REG(base, SETUP), BIT(14));
+
+#if defined(CONFIG_BCM7425B0) || defined(CONFIG_BCM7435A0) || \
+	defined(CONFIG_BCM7435B0)
+	/* SWLINUX-2259 - Work around a USB DMA to memc1 arbitration bug */
+	BDEV_SET(USB_REG(base, SETUP), BIT(13));
+#endif
+
 #endif
 
 #if defined(BCHP_USB_CTRL_GENERIC_CTL_1_PLL_SUSPEND_EN_MASK)
