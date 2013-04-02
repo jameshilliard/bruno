@@ -59,6 +59,8 @@
 #include "bcmgenet.h"
 #include "if_net.h"
 
+#define MY_BUG_ON(c) do { if ((c)) { printk(KERN_EMERG "MY_BUG_ON(%s) at %s:%d\n", #c, __FILE__, __LINE__); BUG(); } } while (0)
+
 #ifdef CONFIG_NET_SCH_MULTIQ
 
 #if CONFIG_BRCM_GENET_VERSION == 1
@@ -866,7 +868,7 @@ Purpose:
 -------------------------------------------------------------------------- */
 static void bcmgenet_timeout(struct net_device *dev)
 {
-	BUG_ON(dev == NULL);
+	MY_BUG_ON(dev == NULL);
 
 	TRACE(("%s: bcmgenet_timeout\n", dev->name));
 
@@ -2207,13 +2209,15 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 	struct BcmEnet_devctrl *pDevCtrl = ptr;
 	struct net_device *dev = pDevCtrl->dev;
 	struct Enet_CB *cb;
-	struct sk_buff *skb;
+	struct sk_buff *skb, *new_skb;
 	unsigned long dmaFlag;
 	int len, discard_cnt = 0;
 	unsigned int rxpktprocessed = 0, rxpkttoprocess = 0;
 	unsigned int p_index = 0, c_index = 0, read_ptr = 0;
 	unsigned long start_addr, end_addr;
 	volatile struct rDmaRingRegs *rDma_desc;
+
+	MY_BUG_ON(pDevCtrl->num_new_skbs != 0);
 
 	rDma_desc = &pDevCtrl->rxDma->rDmaRings[index];
 
@@ -2254,7 +2258,8 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 
 		cb = &pDevCtrl->rxCbs[read_ptr];
 		skb = cb->skb;
-		BUG_ON(skb == NULL);
+		MY_BUG_ON(skb == NULL);
+		cb->skb = NULL;
 		dma_unmap_single(&dev->dev, cb->dma_addr,
 				pDevCtrl->rxBufLen, DMA_FROM_DEVICE);
 
@@ -2274,8 +2279,8 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 				pDevCtrl->rxBds[read_ptr].length_status);
 			dev->stats.rx_dropped++;
 			dev->stats.rx_errors++;
-			dev_kfree_skb_any(cb->skb);
-			cb->skb = NULL;
+			MY_BUG_ON(pDevCtrl->num_new_skbs >= TOTAL_DESC * 2);
+			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs++] = skb;
 			continue;
 		}
 		/* report errors */
@@ -2297,10 +2302,24 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 			dev->stats.rx_errors++;
 
 			/* discard the packet and advance consumer index.*/
-			dev_kfree_skb_any(cb->skb);
-			cb->skb = NULL;
+			MY_BUG_ON(pDevCtrl->num_new_skbs >= TOTAL_DESC * 2);
+			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs++] = skb;
 			continue;
 		} /* error packet */
+
+		MY_BUG_ON(pDevCtrl->num_new_skbs >= TOTAL_DESC * 2);
+		new_skb = netdev_alloc_skb(pDevCtrl->dev,
+			pDevCtrl->rxBufLen + SKB_ALIGNMENT);
+		if (!new_skb) {
+			pr_err_ratelimited("%s: failed to allocate skb, "
+				"dropping old packet.\n", dev->name);
+			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs++] = skb;
+			dev->stats.rx_over_errors++;
+			dev->stats.rx_dropped++;
+			continue;
+		}
+		handleAlignment(pDevCtrl, new_skb);
+		pDevCtrl->new_skbs[pDevCtrl->num_new_skbs++] = new_skb;
 
 		skb_put(skb, len);
 		if (pDevCtrl->rbuf->rbuf_ctrl & RBUF_64B_EN) {
@@ -2346,7 +2365,6 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 #else
 		netif_receive_skb(skb);
 #endif
-		cb->skb = NULL;
 		TRACE(("pushed up to kernel\n"));
 	}
 
@@ -2356,6 +2374,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 		 * rdma_read_pointer so do not update it until after
 		 * assign_rx_buffers_for_queue has been called.
 		 */
+		MY_BUG_ON(rxpktprocessed != pDevCtrl->num_new_skbs);
 		assign_rx_buffers_for_queue(pDevCtrl, index);
 		rDma_desc->rdma_read_pointer = (read_ptr << 1) &
 			DMA_RW_POINTER_MASK;
@@ -2441,13 +2460,21 @@ static int assign_rx_buffers_range(struct BcmEnet_devctrl *pDevCtrl,
 	read_ptr = (read_pointer & DMA_RW_POINTER_MASK) >> 1;
 	while (pDevCtrl->rxBds[read_ptr].address == 0) {
 		cb = &pDevCtrl->rxCbs[read_ptr];
-		skb = netdev_alloc_skb(pDevCtrl->dev,
-				pDevCtrl->rxBufLen + SKB_ALIGNMENT);
-		if (!skb) {
-			printk(KERN_ERR " failed to allocate skb for rx\n");
-			break;
+		if (pDevCtrl->num_new_skbs > 0) {
+			skb = pDevCtrl->new_skbs[--pDevCtrl->num_new_skbs];
+			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs] = NULL;
+			MY_BUG_ON(!skb);
+		} else {
+			skb = netdev_alloc_skb(pDevCtrl->dev,
+					pDevCtrl->rxBufLen + SKB_ALIGNMENT);
+			if (!skb) {
+				pr_err_ratelimited(
+					"%s: failed to allocate skb for rx\n",
+					pDevCtrl->dev->name);
+				break;
+			}
+			handleAlignment(pDevCtrl, skb);
 		}
-		handleAlignment(pDevCtrl, skb);
 
 		/* keep count of any BD's we refill */
 		bdsfilled++;
@@ -2608,7 +2635,7 @@ static void init_edma(struct BcmEnet_devctrl *pDevCtrl)
 	rDma_desc->rdma_producer_index = 0;
 	rDma_desc->rdma_consumer_index = 0;
 	/* Initialize default queue. */
-	BUG_ON(GENET_RX_TOTAL_MQ_BD > TOTAL_DESC);
+	MY_BUG_ON(GENET_RX_TOTAL_MQ_BD > TOTAL_DESC);
 	rDma_desc->rdma_ring_buf_size = ((GENET_RX_DEFAULT_BD_CNT <<
 				DMA_RING_SIZE_SHIFT) | RX_BUF_LENGTH);
 	rDma_desc->rdma_start_addr = 2 * GENET_RX_TOTAL_MQ_BD;
@@ -3260,8 +3287,8 @@ void bcmgenet_enable_pcp_hfb(struct BcmEnet_devctrl *pDevCtrl)
 		volatile unsigned long *addr =
 			&pDevCtrl->hfb[filter * filter_size];
 
-		BUG_ON(PCP_START < 0 || PCP_START >= PCP_COUNT);
-		BUG_ON(PCP_END < 0 || PCP_END >= PCP_COUNT);
+		MY_BUG_ON(PCP_START < 0 || PCP_START >= PCP_COUNT);
+		MY_BUG_ON(PCP_END < 0 || PCP_END >= PCP_COUNT);
 		/*
 		 * Mask the first 12 bytes (destination mac address, source mac
 		 * address. This involves setting the first 24 bytes (NOT 12!)
