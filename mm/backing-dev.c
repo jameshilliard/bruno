@@ -6,6 +6,7 @@
 #include <linux/fs.h>
 #include <linux/pagemap.h>
 #include <linux/mm.h>
+#include <linux/ratelimit.h>
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/writeback.h>
@@ -802,6 +803,7 @@ EXPORT_SYMBOL(congestion_wait);
  */
 long wait_iff_congested(struct zone *zone, int sync, long timeout)
 {
+	static DEFINE_RATELIMIT_STATE(rs, HZ * 10, 50);
 	long ret;
 	unsigned long start = jiffies;
 	DEFINE_WAIT(wait);
@@ -812,6 +814,7 @@ long wait_iff_congested(struct zone *zone, int sync, long timeout)
 	 * encountered in the current zone, yield if necessary instead
 	 * of sleeping on the congestion queue
 	 */
+#if 0
 	if (atomic_read(&nr_bdi_congested[sync]) == 0 ||
 			!zone_is_reclaim_congested(zone)) {
 		cond_resched();
@@ -823,8 +826,11 @@ long wait_iff_congested(struct zone *zone, int sync, long timeout)
 
 		goto out;
 	}
-
+#endif
 	/* Sleep until uncongested or a write happens */
+	if (__ratelimit(&rs))
+		printk("Congested: pid %d (%s) sleeping.\n",
+			task_pid_nr(current), current->comm);
 	prepare_to_wait(wqh, &wait, TASK_UNINTERRUPTIBLE);
 	ret = io_schedule_timeout(timeout);
 	finish_wait(wqh, &wait);

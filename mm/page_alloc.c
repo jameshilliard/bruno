@@ -32,6 +32,7 @@
 #include <linux/slab.h>
 #include <linux/oom.h>
 #include <linux/notifier.h>
+#include <linux/ratelimit.h>
 #include <linux/topology.h>
 #include <linux/sysctl.h>
 #include <linux/cpu.h>
@@ -1992,6 +1993,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	nodemask_t *nodemask, struct zone *preferred_zone,
 	int migratetype)
 {
+	static DEFINE_RATELIMIT_STATE(rs, HZ * 10, 50);
 	const gfp_t wait = gfp_mask & __GFP_WAIT;
 	struct page *page = NULL;
 	int alloc_flags;
@@ -2111,6 +2113,13 @@ rebalance:
 					goto nopage;
 			}
 
+			/* If we're a realtime task, we need to share. */
+			if (__ratelimit(&rs))
+				printk("Mem pressure: pid %d (%s) sleeping.\n",
+					task_pid_nr(current), current->comm);
+			struct timespec ts = { 1, 50*1000000 };
+			hrtimer_nanosleep(&ts, NULL, HRTIMER_MODE_REL,
+						CLOCK_MONOTONIC);
 			goto restart;
 		}
 	}
