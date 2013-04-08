@@ -117,7 +117,7 @@ struct BcmEnet_devctrl {
 	unsigned int rxRingCIndex[GENET_RX_RING_COUNT];	/* consumer index for each ring */
 	unsigned int rxRingDiscCnt[GENET_RX_RING_COUNT];	/* # of discarded pkt for each ring */
 	unsigned char *rxRingStart[GENET_RX_RING_COUNT];	/* ring buffer start addr.*/
-	struct sk_buff *new_skbs[TOTAL_DESC * 2]; /* skbs to put in queue */
+	struct sk_buff *new_skbs[TOTAL_DESC]; /* skbs to put in queue */
 	int	num_new_skbs; /* number of slots used in new_skbs */
 
 	/* other misc variables */

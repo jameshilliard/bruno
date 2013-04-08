@@ -59,8 +59,6 @@
 #include "bcmgenet.h"
 #include "if_net.h"
 
-#define MY_BUG_ON(c) do { if ((c)) { printk(KERN_EMERG "MY_BUG_ON(%s) at %s:%d\n", #c, __FILE__, __LINE__); BUG(); } } while (0)
-
 #ifdef CONFIG_NET_SCH_MULTIQ
 
 #if CONFIG_BRCM_GENET_VERSION == 1
@@ -868,7 +866,7 @@ Purpose:
 -------------------------------------------------------------------------- */
 static void bcmgenet_timeout(struct net_device *dev)
 {
-	MY_BUG_ON(dev == NULL);
+	BUG_ON(dev == NULL);
 
 	TRACE(("%s: bcmgenet_timeout\n", dev->name));
 
@@ -2217,7 +2215,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 	unsigned long start_addr, end_addr;
 	volatile struct rDmaRingRegs *rDma_desc;
 
-	MY_BUG_ON(pDevCtrl->num_new_skbs != 0);
+	BUG_ON(pDevCtrl->num_new_skbs != 0);
 
 	rDma_desc = &pDevCtrl->rxDma->rDmaRings[index];
 
@@ -2258,7 +2256,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 
 		cb = &pDevCtrl->rxCbs[read_ptr];
 		skb = cb->skb;
-		MY_BUG_ON(skb == NULL);
+		BUG_ON(skb == NULL);
 		cb->skb = NULL;
 		dma_unmap_single(&dev->dev, cb->dma_addr,
 				pDevCtrl->rxBufLen, DMA_FROM_DEVICE);
@@ -2279,7 +2277,8 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 				pDevCtrl->rxBds[read_ptr].length_status);
 			dev->stats.rx_dropped++;
 			dev->stats.rx_errors++;
-			MY_BUG_ON(pDevCtrl->num_new_skbs >= TOTAL_DESC * 2);
+			BUG_ON(pDevCtrl->num_new_skbs
+				>= ARRAY_SIZE(pDevCtrl->new_skbs));
 			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs++] = skb;
 			continue;
 		}
@@ -2302,12 +2301,14 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 			dev->stats.rx_errors++;
 
 			/* discard the packet and advance consumer index.*/
-			MY_BUG_ON(pDevCtrl->num_new_skbs >= TOTAL_DESC * 2);
+			BUG_ON(pDevCtrl->num_new_skbs
+				>= ARRAY_SIZE(pDevCtrl->new_skbs));
 			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs++] = skb;
 			continue;
 		} /* error packet */
 
-		MY_BUG_ON(pDevCtrl->num_new_skbs >= TOTAL_DESC * 2);
+		BUG_ON(pDevCtrl->num_new_skbs
+			>= ARRAY_SIZE(pDevCtrl->new_skbs));
 		new_skb = netdev_alloc_skb(pDevCtrl->dev,
 			pDevCtrl->rxBufLen + SKB_ALIGNMENT);
 		if (!new_skb) {
@@ -2374,7 +2375,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 		 * rdma_read_pointer so do not update it until after
 		 * assign_rx_buffers_for_queue has been called.
 		 */
-		MY_BUG_ON(rxpktprocessed != pDevCtrl->num_new_skbs);
+		BUG_ON(rxpktprocessed != pDevCtrl->num_new_skbs);
 		assign_rx_buffers_for_queue(pDevCtrl, index);
 		rDma_desc->rdma_read_pointer = (read_ptr << 1) &
 			DMA_RW_POINTER_MASK;
@@ -2461,9 +2462,22 @@ static int assign_rx_buffers_range(struct BcmEnet_devctrl *pDevCtrl,
 	while (pDevCtrl->rxBds[read_ptr].address == 0) {
 		cb = &pDevCtrl->rxCbs[read_ptr];
 		if (pDevCtrl->num_new_skbs > 0) {
+			/*
+			 * Elsewhere, we intentionally allocate new skbs
+			 * before taking the old ones out of the queue.
+			 * This guarantees there will always be a fresh skb
+			 * in new_skbs[] available for us here, even when no
+			 * memory is available for a new allocation.
+			 * The rest of the driver has no ability to deal with
+			 * descriptors lacking skbs, so this is very important
+			 * to avoid crashes.  If there *is* a shortage,
+			 * the receiver sacrifices an already-received packet
+			 * and recycles its skb into new_skbs[] for us to use
+			 * here.
+			 */
 			skb = pDevCtrl->new_skbs[--pDevCtrl->num_new_skbs];
 			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs] = NULL;
-			MY_BUG_ON(!skb);
+			BUG_ON(!skb);
 		} else {
 			skb = netdev_alloc_skb(pDevCtrl->dev,
 					pDevCtrl->rxBufLen + SKB_ALIGNMENT);
@@ -2471,7 +2485,18 @@ static int assign_rx_buffers_range(struct BcmEnet_devctrl *pDevCtrl,
 				pr_err_ratelimited(
 					"%s: failed to allocate skb for rx\n",
 					pDevCtrl->dev->name);
-				break;
+				/*
+				 * Since we should be using the new_skbs[]
+				 * array for all our allocations other than
+				 * the first, this should only be possible
+				 * during device initialization. And the
+				 * driver has no ability to recover from a
+				 * failed initialization.  Which is a bug,
+				 * but not one we expect to trigger.
+				 * If it ever does, well, let's panic here
+				 * instead of randomly later.
+				 */
+				BUG();
 			}
 			handleAlignment(pDevCtrl, skb);
 		}
@@ -2493,6 +2518,7 @@ static int assign_rx_buffers_range(struct BcmEnet_devctrl *pDevCtrl,
 			read_ptr++;
 		}
 	}
+	BUG_ON(pDevCtrl->num_new_skbs != 0);
 	return bdsfilled;
 }
 
@@ -2635,7 +2661,7 @@ static void init_edma(struct BcmEnet_devctrl *pDevCtrl)
 	rDma_desc->rdma_producer_index = 0;
 	rDma_desc->rdma_consumer_index = 0;
 	/* Initialize default queue. */
-	MY_BUG_ON(GENET_RX_TOTAL_MQ_BD > TOTAL_DESC);
+	BUG_ON(GENET_RX_TOTAL_MQ_BD > TOTAL_DESC);
 	rDma_desc->rdma_ring_buf_size = ((GENET_RX_DEFAULT_BD_CNT <<
 				DMA_RING_SIZE_SHIFT) | RX_BUF_LENGTH);
 	rDma_desc->rdma_start_addr = 2 * GENET_RX_TOTAL_MQ_BD;
@@ -3287,8 +3313,8 @@ void bcmgenet_enable_pcp_hfb(struct BcmEnet_devctrl *pDevCtrl)
 		volatile unsigned long *addr =
 			&pDevCtrl->hfb[filter * filter_size];
 
-		MY_BUG_ON(PCP_START < 0 || PCP_START >= PCP_COUNT);
-		MY_BUG_ON(PCP_END < 0 || PCP_END >= PCP_COUNT);
+		BUG_ON(PCP_START < 0 || PCP_START >= PCP_COUNT);
+		BUG_ON(PCP_END < 0 || PCP_END >= PCP_COUNT);
 		/*
 		 * Mask the first 12 bytes (destination mac address, source mac
 		 * address. This involves setting the first 24 bytes (NOT 12!)
