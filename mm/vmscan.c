@@ -23,6 +23,7 @@
 #include <linux/file.h>
 #include <linux/writeback.h>
 #include <linux/blkdev.h>
+#include <linux/oom.h>
 #include <linux/buffer_head.h>	/* for try_to_release_page(),
 					buffer_heads_over_limit */
 #include <linux/mm_inline.h>
@@ -50,6 +51,8 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/vmscan.h>
+
+#define SEC_IN_NANOS 1000000000LL
 
 enum lumpy_mode {
 	LUMPY_MODE_NONE,
@@ -2041,6 +2044,44 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 		.mem_cgroup = NULL,
 		.nodemask = nodemask,
 	};
+
+	{
+		static DEFINE_SPINLOCK(lock);
+		static int numfrees, thrashcount;
+		static u64 lastprint_time;
+		unsigned long flags;
+		int thrashing = 0;
+		u64 now = cpu_clock(0);
+		spin_lock_irqsave(&lock, flags);
+		numfrees++;
+		if (thrashcount && now - lastprint_time > 10*SEC_IN_NANOS) {
+			/*
+			 * the thrashing period is over; the last attempt
+			 * was a long time ago.
+			 */
+			thrashcount = 0;
+		} else if (now - lastprint_time > SEC_IN_NANOS) {
+			pr_err("try_to_free_pages: %d attempts in %lldms\n",
+				numfrees,
+				div_u64(now - lastprint_time, 1000000));
+			if (numfrees > 10) thrashcount++;
+			lastprint_time = now;
+			numfrees = 0;
+			if (thrashcount > 10) {
+				/*
+				 * once we're thrashing, re-fire the OOM
+				 * killer more frequently until it ends.
+				 */
+				thrashcount -= 2;
+				thrashing = 1;
+			}
+		}
+		spin_unlock_irqrestore(&lock, flags);
+		if (thrashing) {
+			pr_err("try_to_free_pages: thrashing detected.  Causing OOM.\n");
+			out_of_memory(zonelist, gfp_mask, order, nodemask);
+		}
+	}
 
 	trace_mm_vmscan_direct_reclaim_begin(order,
 				sc.may_writepage,
