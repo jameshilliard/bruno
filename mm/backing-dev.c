@@ -814,9 +814,9 @@ long wait_iff_congested(struct zone *zone, int sync, long timeout)
 	 * encountered in the current zone, yield if necessary instead
 	 * of sleeping on the congestion queue
 	 */
-#if 0
-	if (atomic_read(&nr_bdi_congested[sync]) == 0 ||
-			!zone_is_reclaim_congested(zone)) {
+	if ((!rt_task(current) || test_tsk_thread_flag(current, TIF_MEMDIE)) &&
+	    (atomic_read(&nr_bdi_congested[sync]) == 0 ||
+			!zone_is_reclaim_congested(zone))) {
 		cond_resched();
 
 		/* In case we scheduled, work out time remaining */
@@ -826,7 +826,7 @@ long wait_iff_congested(struct zone *zone, int sync, long timeout)
 
 		goto out;
 	}
-#endif
+
 	/* Sleep until uncongested or a write happens */
 	if (__ratelimit(&rs))
 		printk("Congested: pid %d (%s) sleeping.\n",

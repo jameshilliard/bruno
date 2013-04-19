@@ -1994,6 +1994,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	int migratetype)
 {
 	static DEFINE_RATELIMIT_STATE(rs, HZ * 10, 50);
+	static DEFINE_RATELIMIT_STATE(rs2, HZ * 10, 1);
 	const gfp_t wait = gfp_mask & __GFP_WAIT;
 	struct page *page = NULL;
 	int alloc_flags;
@@ -2137,8 +2138,10 @@ nopage:
 		printk(KERN_WARNING "%s: page allocation failure."
 			" order:%d, mode:0x%x\n",
 			p->comm, order, gfp_mask);
-		dump_stack();
-		show_mem();
+		if (__ratelimit(&rs2)) {
+			dump_stack();
+			show_mem();
+		}
 	}
 	return page;
 got_pg:

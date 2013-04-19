@@ -32,6 +32,7 @@
 #include <linux/mempolicy.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
+#include <linux/ratelimit.h>
 
 int sysctl_panic_on_oom;
 int sysctl_oom_kill_allocating_task;
@@ -92,11 +93,9 @@ static bool has_intersects_mems_allowed(struct task_struct *tsk,
 static void boost_dying_task_prio(struct task_struct *p,
 				  struct mem_cgroup *mem)
 {
-	struct sched_param param = { .sched_priority = 1 };
-
+	struct sched_param param = { .sched_priority = 99 };
 	if (mem)
 		return;
-
 	if (!rt_task(p))
 		sched_setscheduler_nocheck(p, SCHED_FIFO, &param);
 }
@@ -128,6 +127,8 @@ static bool oom_unkillable_task(struct task_struct *p,
 	if (is_global_init(p))
 		return true;
 	if (p->flags & PF_KTHREAD)
+		return true;
+	if (test_tsk_thread_flag(p, TIF_MEMDIE)) /* already dying, ignore */
 		return true;
 
 	/* When mem_cgroup_out_of_memory() and p is not member of the group */
@@ -314,8 +315,10 @@ static struct task_struct *select_bad_process(unsigned int *ppoints,
 		 * blocked waiting for another task which itself is waiting
 		 * for memory. Is there a better alternative?
 		 */
+#if 0 /* apenwarr: instead, we'll simply ratelimit the OOM killer function */
 		if (test_tsk_thread_flag(p, TIF_MEMDIE))
 			return ERR_PTR(-1UL);
+#endif
 
 		if (p->flags & PF_EXITING) {
 			/*
@@ -681,6 +684,7 @@ static void clear_system_oom(void)
 void out_of_memory(struct zonelist *zonelist, gfp_t gfp_mask,
 		int order, nodemask_t *nodemask)
 {
+	static DEFINE_RATELIMIT_STATE(rl, 2, 1);
 	const nodemask_t *mpol_mask;
 	struct task_struct *p;
 	unsigned long totalpages;
@@ -688,6 +692,8 @@ void out_of_memory(struct zonelist *zonelist, gfp_t gfp_mask,
 	unsigned int points;
 	enum oom_constraint constraint = CONSTRAINT_NONE;
 	int killed = 0;
+
+	if (!__ratelimit(&rl)) return;
 
 	blocking_notifier_call_chain(&oom_notify_list, 0, &freed);
 	if (freed > 0)
