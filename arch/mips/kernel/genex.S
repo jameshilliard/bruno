@@ -238,7 +238,10 @@ NESTED(except_vec4, 0, sp)
  * unconditional jump to this vector.
  */
 NESTED(except_vec_ejtag_debug, 0, sp)
+	.align	4
 	j	ejtag_debug_handler
+	.align	4
+EXPORT(except_vec_ejtag_debug_end)
 	END(except_vec_ejtag_debug)
 
 	__FINIT

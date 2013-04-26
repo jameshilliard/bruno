@@ -693,6 +693,7 @@
 
 #define BRCM_NMI_VEC		0x80000000
 #define BRCM_WARM_RESTART_VEC	0x80000380
+#define BRCM_EJTAG_DEBUG_VEC    0x80000480
 
 /* Kernel will program WKTMR to expire in 1 second */
 #define BRCM_STANDBY_TEST		0x01
@@ -1076,6 +1077,10 @@ extern char brcm_reset_nmi_vec_end[];
 /* TP1 warm restart interrupt vector */
 extern char brcm_tp1_int_vec[];
 extern char brcm_tp1_int_vec_end[];
+
+/* EJTAG debug vector */
+extern char except_vec_ejtag_debug[];
+extern char except_vec_ejtag_debug_end[];
 
 extern atomic_t brcm_unaligned_fp_count;
 extern atomic_t brcm_rdhwr_count;		/* excludes rdhwr fastpath */
