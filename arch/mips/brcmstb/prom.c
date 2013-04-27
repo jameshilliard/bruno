@@ -586,6 +586,8 @@ static inline void __cpuinit brcm_nmi_handler_setup(void)
 	brcm_wr_vec(BRCM_NMI_VEC, brcm_reset_nmi_vec, brcm_reset_nmi_vec_end);
 	brcm_wr_vec(BRCM_WARM_RESTART_VEC, brcm_tp1_int_vec,
 		brcm_tp1_int_vec_end);
+	brcm_wr_vec(BRCM_EJTAG_DEBUG_VEC, except_vec_ejtag_debug,
+		except_vec_ejtag_debug_end);
 }
 
 static void __cpuinit set_board_nmi_handler(void)
