@@ -1065,7 +1065,7 @@ void hid_debug_register(struct hid_device *hdev, const char *name)
 			hdev->debug_dir, hdev, &hid_debug_rdesc_fops);
 	hdev->debug_events = debugfs_create_file("events", 0400,
 			hdev->debug_dir, hdev, &hid_debug_events_fops);
-	hdev->debug_battery = debugfs_create_u32("battery_level", 0400,
+	hdev->debug_battery = debugfs_create_u32("battery_level", 0444,
 			hdev->debug_dir, &hdev->debug_battery_level);
 	// Battery level ranges between [0, 100]. Set 999 as an invalid default value.
 	// It will be overwritten very soon by hid_debug_battery_level().
