@@ -1914,8 +1914,7 @@ static unsigned int bcmgenet_ring_rx(void *ptr, unsigned int budget)
 
 		if (rx_discard_flag) {
 			int discard_cnt = rDma_ring->rdma_producer_index >> 16;
-			/* Report rx overrun errors */
-			pDevCtrl->dev->stats.rx_over_errors += discard_cnt;
+			pDevCtrl->dev->stats.rx_missed_errors += discard_cnt;
 			pDevCtrl->rxRingDiscCnt[i] += discard_cnt;
 			rDma_ring->rdma_producer_index = 0;
 		}
@@ -2017,7 +2016,6 @@ static unsigned int bcmgenet_ring_rx(void *ptr, unsigned int budget)
 				if (dmaFlag & DMA_RX_LG)
 					pDevCtrl->dev->stats.rx_length_errors++;
 
-				pDevCtrl->dev->stats.rx_dropped++;
 				pDevCtrl->dev->stats.rx_errors++;
 				dev_kfree_skb_any(cb->skb);
 				cb->skb = NULL;
@@ -2235,8 +2233,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 
 	discard_cnt = (rDma_desc->rdma_producer_index >> 16);
 	if (discard_cnt) {
-		/* Report rx overrun errors */
-		pDevCtrl->dev->stats.rx_over_errors += discard_cnt;
+		pDevCtrl->dev->stats.rx_missed_errors += discard_cnt;
 		pDevCtrl->rxRingDiscCnt[index] += discard_cnt;
 		rDma_desc->rdma_producer_index = 0;
 	}
@@ -2297,7 +2294,6 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 				dev->stats.rx_frame_errors++;
 			if (dmaFlag & DMA_RX_LG)
 				dev->stats.rx_length_errors++;
-			dev->stats.rx_dropped++;
 			dev->stats.rx_errors++;
 
 			/* discard the packet and advance consumer index.*/
@@ -2315,8 +2311,7 @@ static unsigned int bcmgenet_desc_rx(void *ptr, unsigned int budget, int index)
 			pr_err_ratelimited("%s: failed to allocate skb, "
 				"dropping old packet.\n", dev->name);
 			pDevCtrl->new_skbs[pDevCtrl->num_new_skbs++] = skb;
-			dev->stats.rx_over_errors++;
-			dev->stats.rx_dropped++;
+			dev->stats.rx_missed_errors++;
 			continue;
 		}
 		handleAlignment(pDevCtrl, new_skb);
