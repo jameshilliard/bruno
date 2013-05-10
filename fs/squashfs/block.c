@@ -31,12 +31,16 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/buffer_head.h>
+#include <linux/sched.h>
 
 #include "squashfs_fs.h"
 #include "squashfs_fs_sb.h"
 #include "squashfs_fs_i.h"
 #include "squashfs.h"
 #include "decompressor.h"
+
+#define NANOSEC 1000000000LL
+#define MEGABYTE 1000000
 
 /*
  * Read the metadata block length, this is stored in the first two
@@ -148,6 +152,24 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 			bytes += msblk->devblksize;
 		}
 		ll_rw_block(READ, b - 1, bh + 1);
+	}
+
+	{
+		static DEFINE_SPINLOCK(lock);
+		static long nbytes, lastprint;
+		static u64 lastprint_time;
+		unsigned long flags;
+		u64 now = cpu_clock(0);
+		spin_lock_irqsave(&lock, flags);
+		nbytes += length;
+		if (nbytes - lastprint > 10 * MEGABYTE) {
+			pr_warn("squashfs: %lld bytes/sec\n",
+				(nbytes - lastprint) * NANOSEC /
+				(now - lastprint_time));
+			lastprint = nbytes;
+			lastprint_time = now;
+		}
+		spin_unlock_irqrestore(&lock, flags);
 	}
 
 	if (compressed) {
