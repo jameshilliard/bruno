@@ -2588,6 +2588,9 @@ static int init_umac(struct BcmEnet_devctrl *pDevCtrl)
 	 */
 	if (pDevCtrl->bIPHdrOptimize)
 		pDevCtrl->rbuf->rbuf_ctrl |= RBUF_ALIGN_2B ;
+	/* Enable 64B Receive Status Block (required for RX checksumming)
+	 * */
+	pDevCtrl->rbuf->rbuf_ctrl |= RBUF_64B_EN;
 #if CONFIG_BRCM_GENET_VERSION >= 3
 	pDevCtrl->rbuf->rbuf_tbuf_size_ctrl = 1;
 #endif
@@ -3658,11 +3661,9 @@ static int bcmgenet_set_rx_csum(struct net_device *dev, u32 val)
 	spin_lock_bh(&pDevCtrl->bh_lock);
 	if (val == 0) {
 		/*pDevCtrl->rbuf->rbuf_endian_ctrl &= ~RBUF_ENDIAN_NOSWAP;*/
-		pDevCtrl->rbuf->rbuf_ctrl &= ~RBUF_64B_EN;
 		pDevCtrl->rbuf->rbuf_chk_ctrl &= ~RBUF_RXCHK_EN;
 	} else {
 		/*pDevCtrl->rbuf->rbuf_endian_ctrl &= ~RBUF_ENDIAN_NOSWAP;*/
-		pDevCtrl->rbuf->rbuf_ctrl |= RBUF_64B_EN;
 		pDevCtrl->rbuf->rbuf_chk_ctrl |= RBUF_RXCHK_EN ;
 	}
 	spin_unlock_bh(&pDevCtrl->bh_lock);
