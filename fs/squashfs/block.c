@@ -163,9 +163,11 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 		spin_lock_irqsave(&lock, flags);
 		nbytes += length;
 		if (nbytes - lastprint > 10 * MEGABYTE) {
+			/* second arg to div_u64 is 32 bits, so we need to
+			 * scale the numerator/divisor a bit. */
 			pr_warn("squashfs: %lld bytes/sec\n",
-				(nbytes - lastprint) * NANOSEC /
-				(now - lastprint_time));
+				div_u64((nbytes - lastprint) * (NANOSEC >> 10),
+				(now - lastprint_time) >> 10));
 			lastprint = nbytes;
 			lastprint_time = now;
 		}

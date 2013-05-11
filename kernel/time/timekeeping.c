@@ -63,7 +63,7 @@ static long get_antirollback_clock(void)
 	if (anti_rollback_time == 0) return 0;
 
 	return anti_rollback_time +
-	    ((get_jiffies_64() - anti_rollback_jiffies) / HZ);
+	    div_u64(get_jiffies_64() - anti_rollback_jiffies, HZ);
 }
 
 static int ar_clock_show(struct seq_file *m, void *v)
