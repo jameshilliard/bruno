@@ -18,6 +18,7 @@
 #include <linux/mutex.h>
 #include <linux/mount.h>
 #include <linux/slab.h>
+#include <linux/mtd/partitions.h>
 
 #define ERROR(fmt, args...) printk(KERN_ERR "block2mtd: " fmt "\n" , ## args)
 #define INFO(fmt, args...) printk(KERN_INFO "block2mtd: " fmt "\n" , ## args)
@@ -231,6 +232,11 @@ static void block2mtd_free_device(struct block2mtd_dev *dev)
 }
 
 
+#ifdef CONFIG_MTD_PARTITIONS
+static const char *part_probes[] = { "cmdlinepart", NULL };
+#endif
+
+
 /* FIXME: ensure that mtd->size % erase_size == 0 */
 static struct block2mtd_dev *add_device(char *devname, int erase_size)
 {
@@ -238,6 +244,10 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size)
 	struct block2mtd_dev *dev;
 	char *name;
 
+#ifdef CONFIG_MTD_PARTITIONS
+	int mtd_parts_nb = 0;
+	struct mtd_partition *mtd_parts = NULL;
+#endif
 	if (!devname)
 		return NULL;
 
@@ -275,7 +285,7 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size)
 
 	/* Setup the MTD structure */
 	/* make the name contain the block device in */
-	name = kasprintf(GFP_KERNEL, "block2mtd: %s", devname);
+	name = kasprintf(GFP_KERNEL, "block2mtd%s", devname);
 	if (!name)
 		goto devinit_err;
 
@@ -283,7 +293,8 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size)
 
 	dev->mtd.size = dev->blkdev->bd_inode->i_size & PAGE_MASK;
 	dev->mtd.erasesize = erase_size;
-	dev->mtd.writesize = 1;
+	dev->mtd.writesize = 64;
+	dev->mtd.writebufsize = 64;
 	dev->mtd.type = MTD_RAM;
 	dev->mtd.flags = MTD_CAP_RAM;
 	dev->mtd.erase = block2mtd_erase;
@@ -294,10 +305,14 @@ static struct block2mtd_dev *add_device(char *devname, int erase_size)
 	dev->mtd.priv = dev;
 	dev->mtd.owner = THIS_MODULE;
 
-	if (add_mtd_device(&dev->mtd)) {
-		/* Device didnt get added, so free the entry */
-		goto devinit_err;
-	}
+#ifdef CONFIG_MTD_PARTITIONS
+	mtd_parts_nb = parse_mtd_partitions(&dev->mtd, part_probes, &mtd_parts, 0);
+	if (mtd_parts_nb > 0) {
+		printk(KERN_NOTICE "Using command line partition definition\n");
+		add_mtd_partitions(&dev->mtd, mtd_parts, mtd_parts_nb);
+	} else
+#endif
+		add_mtd_device(&dev->mtd);
 	list_add(&dev->list, &blkmtd_device_list);
 	INFO("mtd%d: [%s] erase_size = %dKiB [%d]", dev->mtd.index,
 			dev->mtd.name + strlen("block2mtd: "),
@@ -439,6 +454,12 @@ static int block2mtd_setup(const char *val, struct kernel_param *kp)
 #endif
 }
 
+static int __init block2mtd_setup_wrap(char *val)
+{
+	return block2mtd_setup(val, NULL);
+}
+
+__setup("block2mtd=", block2mtd_setup_wrap);
 
 module_param_call(block2mtd, block2mtd_setup, NULL, NULL, 0200);
 MODULE_PARM_DESC(block2mtd, "Device to use. \"block2mtd=<dev>[,<erasesize>]\"");
