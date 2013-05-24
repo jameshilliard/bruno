@@ -3399,9 +3399,10 @@ static void hub_events(void)
 			}
 			
 			if (portchange & USB_PORT_STAT_C_OVERCURRENT) {
-				dev_err (hub_dev,
-					"over-current change on port %d\n",
-					i);
+				if (printk_ratelimit())
+					dev_err (hub_dev,
+						"over-current change on "
+						"port %d\n", i);
 				clear_port_feature(hdev, i,
 					USB_PORT_FEAT_C_OVER_CURRENT);
 				hub_power_on(hub, true);
