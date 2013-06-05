@@ -126,7 +126,7 @@ static struct mtd_partition nand_v2[] =
 	{name: KERNEL1_NAME, size: KERNEL1_SIZE_V2, offset: KERNEL1_OFFSET_V2},
 	{name: ROOTFS0_NAME, size: ROOTFS0_SIZE_V2, offset: ROOTFS0_OFFSET_V2},
 	{name: ROOTFS1_NAME, size: ROOTFS1_SIZE_V2, offset: ROOTFS1_OFFSET_V2},
-	{name: EMERGENCY_NAME, size: DATA_SIZE_V2, offset: EMERGENCY_OFFSET_V2},
+	{name: EMERGENCY_NAME, size: EMERGENCY_SIZE_V2, offset: EMERGENCY_OFFSET_V2},
 	{name: DATA_NAME, size: DATA_SIZE_V2, offset: DATA_OFFSET_V2}
 };
 
