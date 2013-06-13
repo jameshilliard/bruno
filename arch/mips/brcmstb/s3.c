@@ -452,6 +452,7 @@ int __ref brcm_pm_s3_standby(int dcache_linesz, unsigned long options)
 
 	/* restore I/O context */
 	board_pinmux_setup();
+	ebi_restore_settings();
 
 #if defined(CONFIG_BRCM_SDIO)
 	bchip_sdio_init(0, BCHP_SDIO_0_CFG_REG_START);

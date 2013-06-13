@@ -1720,7 +1720,7 @@ static void bcm7408_pm_usb_enable(u32 flags)
 	BDEV_WR_F_RB(USB_CTRL_PLL_CTL_1, XTAL_PWRDWNB, 1);
 	BDEV_WR_F_RB(USB_CTRL_PLL_CTL_1, PLL_PWRDWNB, 1);
 
-	BDEV_WR_F_RB(USB_CTRL_UTMI_CTL_1, UTMI_SOFT_RESETB, 0xE);
+	BDEV_WR_F_RB(USB_CTRL_UTMI_CTL_1, UTMI_SOFT_RESETB, 0xF);
 	BDEV_WR_F_RB(USB_CTRL_UTMI_CTL_1, UTMI_IDDQ, 0);
 	/* power up all 4 ports */
 	BDEV_WR_F_RB(USB_CTRL_UTMI_CTL_1, PHY_PWDNB, 0xF);
@@ -2202,7 +2202,8 @@ static struct brcm_chip_pm_ops chip_pm_ops = {
 	defined(CONFIG_BCM7231) || \
 	defined(CONFIG_BCM7552) || \
 	defined(CONFIG_BCM7344) || \
-	defined(CONFIG_BCM7358)
+	defined(CONFIG_BCM7358) || \
+	defined(CONFIG_BCM7360)
 static __maybe_unused int mem_power_down = 1;
 
 #undef PLL_CH_ENA
@@ -3258,6 +3259,7 @@ static void bcm7425_pm_pcie_disable(u32 flags)
 {
 	PRINT_PM_CALLBACK;
 
+	BDEV_WR_F(PCIE_MISC_HARD_PCIE_HARD_DEBUG, SERDES_IDDQ, 1);
 	PLL_CH_DIS(CLKGEN_PLL_HIF_PLL_CHANNEL_CTRL, 0);
 	PLL_CH_DIS(CLKGEN_PLL_HIF_PLL_CHANNEL_CTRL, 1);
 	PLL_DIS(CLKGEN_PLL_HIF_PLL);
@@ -3270,6 +3272,7 @@ static void bcm7425_pm_pcie_enable(u32 flags)
 	PLL_ENA(CLKGEN_PLL_HIF_PLL);
 	PLL_CH_ENA(CLKGEN_PLL_HIF_PLL_CHANNEL_CTRL, 0);
 	PLL_CH_ENA(CLKGEN_PLL_HIF_PLL_CHANNEL_CTRL, 1);
+	BDEV_WR_F(PCIE_MISC_HARD_PCIE_HARD_DEBUG, SERDES_IDDQ, 0);
 }
 
 static struct clk clk_pcie = {
@@ -3299,7 +3302,9 @@ static struct brcm_chip_pm_ops chip_pm_ops = {
 };
 #endif
 
-#if defined(CONFIG_BCM7552) || defined(CONFIG_BCM7358)
+#if	defined(CONFIG_BCM7552) || \
+	defined(CONFIG_BCM7358) || \
+	defined(CONFIG_BCM7360)
 static void bcm7552_pm_usb_disable(u32 flags)
 {
 	PRINT_PM_CALLBACK;

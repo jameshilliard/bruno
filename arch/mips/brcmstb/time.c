@@ -17,6 +17,7 @@
 
 #include <linux/init.h>
 #include <linux/clocksource.h>
+#include <linux/printk.h>
 #include <linux/spinlock.h>
 
 #include <asm/time.h>
@@ -135,6 +136,16 @@ static __init unsigned long brcm_mips_freq(void)
 	return read_c0_count() * SAMPLE_PERIOD;
 }
 
+void read_persistent_clock(struct timespec *ts)
+{
+	struct wktmr_time now;
+
+	wktmr_read(&now);
+
+	ts->tv_sec = now.sec;
+	ts->tv_nsec = now.pre * (1000000000/WKTMR_FREQ);
+}
+
 #else /* CONFIG_BRCM_HAS_WKTMR */
 
 /*
@@ -173,7 +184,7 @@ void __init plat_time_init(void)
 {
 	unsigned int khz;
 
-	printk(KERN_DEBUG "Measuring MIPS counter frequency...\n");
+	pr_info("Measuring MIPS counter frequency...\n");
 	mips_hpt_frequency = brcm_mips_freq();
 	khz = mips_hpt_frequency / 1000;
 #ifdef CONFIG_BMIPS5000
@@ -182,9 +193,8 @@ void __init plat_time_init(void)
 	brcm_cpu_khz = mips_hpt_frequency * 2 / 1000;
 #endif
 
-	printk(KERN_INFO "Detected MIPS clock frequency: %lu MHz "
-		"(%u.%03u MHz counter)\n", brcm_cpu_khz / 1000,
-		khz / 1000, khz % 1000);
+	pr_info("Detected MIPS clock frequency: %lu MHz (%u.%03u MHz counter)\n",
+		brcm_cpu_khz / 1000, khz / 1000, khz % 1000);
 
 #ifdef CONFIG_CSRC_WKTMR
 	init_wktmr_clocksource();
@@ -193,3 +203,4 @@ void __init plat_time_init(void)
 	init_upg_clocksource();
 #endif
 }
+
