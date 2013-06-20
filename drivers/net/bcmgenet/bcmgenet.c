@@ -3846,6 +3846,7 @@ static void bcmgenet_power_down(struct BcmEnet_devctrl *pDevCtrl, int mode)
 		/* Power down LED */
 		pDevCtrl->mii.mdio_write(pDevCtrl->dev,
 				pDevCtrl->phyAddr, MII_BMCR, BMCR_RESET);
+		udelay(1);
 		if (pDevCtrl->ext)
 			pDevCtrl->ext->ext_pwr_mgmt |= (EXT_PWR_DOWN_PHY |
 				EXT_PWR_DOWN_DLL | EXT_PWR_DOWN_BIAS);
@@ -3867,10 +3868,10 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 		/* enable APD */
 		if (pDevCtrl->ext) {
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PWR_DN_EN_LD;
-			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PHY_RESET;
+			pDevCtrl->mii.mdio_write(pDevCtrl->dev,
+					pDevCtrl->phyAddr, MII_BMCR,
+					BMCR_RESET);
 			udelay(1);
-			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_PHY_RESET;
-			udelay(100);
 		}
 		/* enable 64 clock MDIO */
 		pDevCtrl->mii.mdio_write(pDevCtrl->dev, pDevCtrl->phyAddr, 0x1d,
@@ -3900,10 +3901,10 @@ static void bcmgenet_power_up(struct BcmEnet_devctrl *pDevCtrl, int mode)
 			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_PWR_DOWN_BIAS;
 			/* enable APD */
 			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PWR_DN_EN_LD;
-			pDevCtrl->ext->ext_pwr_mgmt |= EXT_PHY_RESET;
+			pDevCtrl->mii.mdio_write(pDevCtrl->dev,
+					pDevCtrl->phyAddr, MII_BMCR,
+					BMCR_RESET);
 			udelay(1);
-			pDevCtrl->ext->ext_pwr_mgmt &= ~EXT_PHY_RESET;
-			udelay(100);
 		}
 		/* enable 64 clock MDIO */
 		pDevCtrl->mii.mdio_write(pDevCtrl->dev, pDevCtrl->phyAddr, 0x1d,

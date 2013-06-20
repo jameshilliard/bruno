@@ -131,6 +131,8 @@ void __init bchip_check_compat(void)
 	/* 7358 kernel can boot on 7552, but not vice-versa */
 	ALT_CHIP_ID(7552, a0);
 	MAIN_CHIP_ID(7358, a0);
+#elif defined(CONFIG_BCM7360)
+	MAIN_CHIP_ID(7360, a0);
 #elif defined(CONFIG_BCM7552)
 	MAIN_CHIP_ID(7552, a0);
 #elif defined(CONFIG_BCM7405)
