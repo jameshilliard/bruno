@@ -369,6 +369,7 @@ static void __init brcm_setup_early_printk(void)
 	init_port();
 }
 
+#if defined(CONFIG_HIGHMEM) && defined(CONFIG_BRCM_HAS_1GB_MEMC1)
 #define SPLASH_TOKEN "splashmem="
 static int parse_splash_mem(const char *arcs_cmdline,
 			    unsigned long *start,
@@ -402,6 +403,7 @@ static int parse_splash_mem(const char *arcs_cmdline,
         cfe_splashmem_present = 1;
 	return 0;
 }
+#endif
 
 /***********************************************************************
  * Main entry point

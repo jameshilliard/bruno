@@ -3,7 +3,6 @@ config BRUNO
 	default y
 	help
 	  This enables support for BRUNO platform.
-	select BCMGENET_0_GPHY
 	select BRCM_OVERRIDE_USB
 	select BRCM_FORCE_USB_PWR_HI
 	select BRCM_FORCE_USB_OC_LO
