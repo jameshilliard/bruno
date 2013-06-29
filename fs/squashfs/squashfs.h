@@ -21,11 +21,12 @@
  * squashfs.h
  */
 
-#define TRACE(s, args...)	pr_debug("SQUASHFS: "s, ## args)
+#include <linux/ratelimit.h>
+#define TRACE(s, args...)	pr_debug_ratelimited("SQUASHFS: "s, ## args)
 
-#define ERROR(s, args...)	pr_err("SQUASHFS error: "s, ## args)
+#define ERROR(s, args...)	pr_err_ratelimited("SQUASHFS error: "s, ## args)
 
-#define WARNING(s, args...)	pr_warning("SQUASHFS: "s, ## args)
+#define WARNING(s, args...)	pr_warn_ratelimited("SQUASHFS: "s, ## args)
 
 static inline struct squashfs_inode_info *squashfs_i(struct inode *inode)
 {
