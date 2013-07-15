@@ -369,9 +369,8 @@ static void __init brcm_setup_early_printk(void)
 	init_port();
 }
 
-#if defined(CONFIG_HIGHMEM) && defined(CONFIG_BRCM_HAS_1GB_MEMC1)
 #define SPLASH_TOKEN "splashmem="
-static int parse_splash_mem(const char *arcs_cmdline,
+int parse_splash_mem(const char *arcs_cmdline,
 			    unsigned long *start,
 			    unsigned long *size)
 {
@@ -403,7 +402,6 @@ static int parse_splash_mem(const char *arcs_cmdline,
         cfe_splashmem_present = 1;
 	return 0;
 }
-#endif
 
 /***********************************************************************
  * Main entry point
@@ -522,7 +520,7 @@ void __init prom_init(void)
 		 * when it boots, if we get memc1= request from bootloader, we
 		 * should try to pull the memory from the end to avoid crossing
 		 * over the memory that is allocated for boot logo image by
-                 * bootloader.
+		 * bootloader.
 		 */
 		unsigned long start_mb, start_b, size, splash_bound = 0;
 		if (0 == parse_splash_mem(arcs_cmdline, &splash_bound, &size)) {
