@@ -575,8 +575,16 @@ void board_pinmux_setup(void)
 
 #elif defined(CONFIG_BCM7429)
 
-	PINMUX(11, gpio_094, 1);	/* UARTB TX */
-	PINMUX(11, gpio_095, 1);	/* UARTB RX */
+	/* BRCM reference board has UARTB on pins 94-95. Google
+	 * board hooks Bluetooth chip to pins 65-68 instead. */
+	PINMUX(11, gpio_094, 0);
+	PINMUX(11, gpio_095, 0);
+	PINMUX(8, gpio_065, 4);	/* UARTB TX */
+	PINMUX(8, gpio_066, 4);	/* UARTB RX */
+	PINMUX(8, gpio_067, 5);	/* UARTB RTS */
+	PINMUX(8, gpio_068, 5);	/* UARTB CTS */
+	AON_PADCTRL(1, aon_gpio_18_pad_ctrl, 2);  /* BT_RST pullup */
+
 	PINMUX(12, gpio_096, 1);	/* UARTC TX */
 	PINMUX(12, gpio_097, 1);	/* UARTC RX */
 
