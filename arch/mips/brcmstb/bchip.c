@@ -242,6 +242,21 @@ void bchip_mips_setup(void)
 	}
 
 #endif
+#if defined(CONFIG_BCM7425)
+	/* disable PREF 30 */
+	__asm__ __volatile__(
+	"	li	$8, 0x5a455048\n"
+	"	.word	0x4088b00f\n"	/* mtc0 $8, $22, 15 */
+	"	nop; nop; nop\n"
+	"	.word	0x4008b008\n"	/* mfc0 $8, $22, 8 */
+	"	lui	$9, 0x0800\n"	/* disable pref 30 */
+	"	or	$8, $9\n"
+	"	.word	0x4088b008\n"	/* mtc0 $8, $22, 8 */
+	"	sync\n"
+	"	li	$8, 0x0\n"
+	"	.word	0x4088b00f\n"	/* mtc0 $8, $22, 15 */
+	: : : "$8", "$9");
+#endif
 }
 
 /***********************************************************************
