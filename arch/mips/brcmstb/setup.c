@@ -31,7 +31,7 @@
 #include <linux/pci.h>
 #include <linux/ioport.h>
 #include <linux/compiler.h>
-#include <linux/bmoca.h>
+#include <linux/bmoca-compat.h>
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/time.h>

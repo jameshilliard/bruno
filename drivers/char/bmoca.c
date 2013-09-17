@@ -45,10 +45,10 @@
 
 #if defined(CONFIG_BRCMSTB)
 #define MOCA6816		0
-#include <linux/bmoca.h>
+#include <linux/bmoca-compat.h>
 #elif defined(DSL_MOCA)
 #define MOCA6816		1
-#include "bmoca.h"
+#include "bmoca-compat.h"
 #include <boardparms.h>
 #include <bcm3450.h>
 // board.h cannot declare spinlock, so do it here
@@ -59,7 +59,7 @@ extern spinlock_t bcm_gpio_spinlock;
 #endif
 #else
 #define MOCA6816		1
-#include <linux/bmoca.h>
+#include <linux/bmoca-compat.h>
 #endif
 
 #if defined(CONFIG_BRCMSTB)

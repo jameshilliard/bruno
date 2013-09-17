@@ -21,7 +21,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/bitops.h>
-#include <linux/bmoca.h>
+#include <linux/bmoca-compat.h>
 #include <linux/mtd/partitions.h>
 
 #include <asm/addrspace.h>

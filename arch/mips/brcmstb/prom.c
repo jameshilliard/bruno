@@ -23,7 +23,7 @@
 #include <linux/root_dev.h>
 #include <linux/types.h>
 #include <linux/smp.h>
-#include <linux/bmoca.h>
+#include <linux/bmoca-compat.h>
 #include <linux/version.h>
 #include <linux/serial_reg.h>
 #include <linux/io.h>
