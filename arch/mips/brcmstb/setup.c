@@ -470,6 +470,7 @@ static void __init brcm_register_moca(int enet_id)
 	struct moca_platform_data pdata;
 	u8 macaddr[ETH_ALEN];
 
+	memset(&pdata, 0, sizeof(pdata));
 	bchip_moca_init();
 
 	memset(&res, 0, sizeof(res));

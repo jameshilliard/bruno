@@ -32,8 +32,8 @@
  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
 :>
 
- <:label-BRCM::DUAL/GPL:standard
- :> 
+ <:label-BRCM::GPL:standard
+ :>
  */
 
 #ifndef _BMOCA_H_
@@ -50,8 +50,18 @@
 #define MOCA_BAND_HIGHRF	0
 #define MOCA_BAND_MIDRF		1
 #define MOCA_BAND_WANRF		2
+#define MOCA_BAND_EXT_D    3
+#define MOCA_BAND_D_LOW    4
+#define MOCA_BAND_D_HIGH   5
+#define MOCA_BAND_E        6
+#define MOCA_BAND_F        7
+#define MOCA_BAND_G        8
+#define MOCA_BAND_H        9
 
-#define MOCA_IOC_MAGIC		'M'
+
+#define MOCA_BOOT_FLAGS_BONDED (1 << 0)
+
+#define MOCA_IOC_MAGIC		('M')
 
 #define MOCA_IOCTL_GET_DRV_INFO_V2	_IOR(MOCA_IOC_MAGIC, 0, \
 	struct moca_kdrv_info_v2)
@@ -129,7 +139,7 @@ struct moca_xfer {
 
 struct moca_start {
 	struct moca_xfer	x;
-	__u32			continuous_power_tx_mode;
+	__u32            boot_flags;
 };
 
 #ifdef __KERNEL__
@@ -166,6 +176,7 @@ struct moca_platform_data {
 	int			useDma;
 	int			useSpi;
 	int			devId;
+	struct spi_device	*spi;
 
 	u32			chip_id;
 
@@ -175,11 +186,18 @@ struct moca_platform_data {
 };
 
 enum {
-	HWREV_MOCA_11 = 0x1100,
-	HWREV_MOCA_11_LITE = 0x1101,
-	HWREV_MOCA_11_PLUS = 0x1102,
-	HWREV_MOCA_20 = 0x2000
+	HWREV_MOCA_11		=  0x1100,
+	HWREV_MOCA_11_LITE	=  0x1101,
+	HWREV_MOCA_11_PLUS	=  0x1102,
+	HWREV_MOCA_20		=  0x2000, /* for backward compatibility */
+	HWREV_MOCA_20_GEN21	=  0x2001,
+	HWREV_MOCA_20_GEN22	=  0x2002,
+	HWREV_MOCA_20_GEN23	=  0x2003,
 };
+
+#define MOCA_PROTVER_11		0x1100
+#define MOCA_PROTVER_20		0x2000
+#define MOCA_PROTVER_MASK	0xff00
 
 #endif /* __KERNEL__ */
 
