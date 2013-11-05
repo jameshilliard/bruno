@@ -87,59 +87,6 @@ do {									\
 	: "=r" (tmp));							\
 } while (0)
 
-#elif defined(CONFIG_BMIPS5000)
-
-/*
- * These are a copy of the CONFIG_CPU_MIPSR1 section, plus extra _ssnop's
- * Hint was found here: http://support.microsoft.com/kb/841192
- * Seems like the 7425 CP0 needs a bit more time to process tlbwi.
- * This makes the crashiness go away (so far).
- */
-ASMMACRO(mtc0_tlbw_hazard,
-	_ssnop; _ssnop; _ssnop; _ssnop; _ehb
-	)
-ASMMACRO(tlbw_use_hazard,
-	_ssnop; _ssnop; _ssnop; _ssnop; _ssnop; _ehb
-	)
-ASMMACRO(tlb_probe_hazard,
-	 _ssnop; _ssnop; _ssnop; _ssnop; _ssnop; _ehb
-	)
-ASMMACRO(irq_enable_hazard,
-	 _ssnop; _ssnop; _ssnop; _ssnop; _ssnop; _ehb
-	)
-ASMMACRO(irq_disable_hazard,
-	_ssnop; _ssnop; _ssnop; _ssnop; _ssnop; _ehb
-	)
-ASMMACRO(back_to_back_c0_hazard,
-	 _ssnop; _ssnop; _ssnop; _ssnop; _ssnop; _ehb
-	)
-/*
- * gcc has a tradition of misscompiling the previous construct using the
- * address of a label as argument to inline assembler.  Gas otoh has the
- * annoying difference between la and dla which are only usable for 32-bit
- * rsp. 64-bit code, so can't be used without conditional compilation.
- * The alterantive is switching the assembler to 64-bit code which happens
- * to work right even for 32-bit code ...
- */
-#define __instruction_hazard()						\
-do {									\
-	unsigned long tmp;						\
-									\
-	__asm__ __volatile__(						\
-	"	.set	mips64r2				\n"	\
-	"	dla	%0, 1f					\n"	\
-	"	jr.hb	%0					\n"	\
-	"	.set	mips0					\n"	\
-	"1:							\n"	\
-	: "=r" (tmp));							\
-} while (0)
-
-#define instruction_hazard()						\
-do {									\
-	if (cpu_has_mips_r2)						\
-		__instruction_hazard();					\
-} while (0)
-
 #elif defined(CONFIG_CPU_MIPSR1) && !defined(CONFIG_MIPS_ALCHEMY)
 
 /*

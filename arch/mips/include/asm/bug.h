@@ -8,6 +8,7 @@
 
 #include <asm/break.h>
 
+#if 0
 static inline void __noreturn BUG(void)
 {
 	__asm__ __volatile__("break %0" : : "i" (BRK_BUG));
@@ -36,7 +37,9 @@ static inline void  __BUG_ON(unsigned long condition)
 
 #endif /* _MIPS_ISA > _MIPS_ISA_MIPS1 */
 
-#endif
+#endif /* 0 */
+
+#endif /* CONFIG_BUG */
 
 #include <asm-generic/bug.h>
 

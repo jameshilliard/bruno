@@ -240,7 +240,6 @@ void bchip_mips_setup(void)
 		"	.word	0x4088b008\n"	/* mtc0 $8, $22, 8 */
 		: : : "$8", "$9");
 	}
-
 #endif
 #if defined(CONFIG_BCM7425)
 	/* disable PREF 30 */
@@ -255,6 +254,21 @@ void bchip_mips_setup(void)
 	"	sync\n"
 	"	li	$8, 0x0\n"
 	"	.word	0x4088b00f\n"	/* mtc0 $8, $22, 15 */
+	: : : "$8", "$9");
+
+        /* Disable JTB and CRS */
+        __asm__ __volatile__(
+	"        li        $8, 0x5a455048\n"
+	"        .word        0x4088b00f\n"
+	"        .word        0x4008b008\n"
+	"        li        $9, 0xfbffffff\n"
+	"        and        $8, $8, $9\n"
+	"        li        $9, 0x0400c000\n"
+	"        or        $8, $8, $9\n"
+	"        .word        0x4088b008\n"
+	"        sync\n"
+	"        li        $8, 0x0\n"
+	"        .word        0x4088b00f\n"
 	: : : "$8", "$9");
 #endif
 }

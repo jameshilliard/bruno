@@ -1256,7 +1256,7 @@ void hrtimer_interrupt(struct clock_event_device *dev)
 	ktime_t expires_next, now, entry_time, delta;
 	int i, retries = 0;
 
-	//BUG_ON(!cpu_base->hres_active);	// disabling this line reduces SEGV and BUS crashes
+	BUG_ON(!cpu_base->hres_active);
 	cpu_base->nr_events++;
 	dev->next_event.tv64 = KTIME_MAX;
 
