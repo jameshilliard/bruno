@@ -255,7 +255,8 @@ void bchip_mips_setup(void)
 	"	li	$8, 0x0\n"
 	"	.word	0x4088b00f\n"	/* mtc0 $8, $22, 15 */
 	: : : "$8", "$9");
-
+#endif
+#if defined(CONFIG_BCM7425) || defined(CONFIG_BCM7429)
         /* Disable JTB and CRS */
         __asm__ __volatile__(
 	"        li        $8, 0x5a455048\n"
