@@ -289,7 +289,7 @@ void bchip_mips_setup(void)
 #endif /* CONFIG_CPU_BIG_ENDIAN */
 
 /* SATA3 SSC per-port bitfield */
-static u32 sata3_enable_ssc;
+static u32 sata3_enable_ssc = ~0;
 
 #define SATA3_MDIO_TXPMD_0_REG_BANK	0x1A0
 #define SATA3_MDIO_BRIDGE_BASE		(BCHP_SATA_GRB_REG_START + 0x100)
