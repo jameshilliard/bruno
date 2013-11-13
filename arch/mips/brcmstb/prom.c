@@ -51,7 +51,8 @@ unsigned long brcm_dram1_linux_mb;
 unsigned long brcm_dram1_start = MEMC1_START;
 unsigned long brcm_min_auth_region_size = 0x1000;
 
-static u8 brcm_primary_macaddr[6] = { 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef };
+static u8 brcm_eth0_macaddr[6] = { 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef };
+static u8 brcm_moca0_macaddr[6] = { 0x00, 0x00, 0xde, 0xad, 0xbe, 0xf0 };
 
 unsigned long brcm_base_baud0 = BRCM_BASE_BAUD_STB;	/* UPG UARTA */
 unsigned long brcm_base_baud = BRCM_BASE_BAUD_STB;	/* UPG_UART[BC] */
@@ -65,6 +66,24 @@ unsigned long __initdata cfe_handle;
 #ifdef CONFIG_CMDLINE_BOOL
 static char __initdata builtin_cmdline[COMMAND_LINE_SIZE] = CONFIG_CMDLINE;
 #endif
+
+static void macaddr_increment(u8 *buf, u8 len, u8 incr)
+{
+	u8 old;
+
+	if (incr == 0)
+		return;
+
+	old = buf[len - 1];
+	buf[len - 1] += incr;
+
+	if (buf[len - 1] < old) {
+		buf[len - 2] += 1;
+		if (buf[len - 2] == 0) {
+			buf[len - 3] += 1;
+		}
+	}
+}
 
 /***********************************************************************
  * CFE bootloader queries
@@ -271,7 +290,10 @@ static void __init __maybe_unused cfe_read_configuration(void)
 	} \
 	} while (0)
 
-	FETCH("ETH0_HWADDR", parse_eth0_hwaddr, brcm_primary_macaddr);
+	FETCH("ETH0_HWADDR", parse_eth0_hwaddr, brcm_eth0_macaddr);
+	memcpy(brcm_moca0_macaddr, brcm_eth0_macaddr, ETH_ALEN);
+	macaddr_increment(brcm_moca0_macaddr, ETH_ALEN, 1);
+	FETCH("MOCA0_HWADDR", parse_eth0_hwaddr, brcm_moca0_macaddr);
 	FETCH("DRAM0_SIZE", parse_ulong, &brcm_dram0_size_mb);
 	FETCH("DRAM1_SIZE", parse_ulong, &brcm_dram1_size_mb);
 	FETCH("CFE_BOARDNAME", parse_boardname, NULL);
@@ -684,10 +706,19 @@ const char *get_system_type(void)
 
 void __init prom_free_prom_memory(void) {}
 
-int brcm_alloc_macaddr(u8 *buf)
+int brcm_alloc_macaddr(u8 *buf, u8 intf_id, bool intf_is_moca)
 {
-	memcpy(buf, brcm_primary_macaddr, ETH_ALEN);
-	brcm_primary_macaddr[4]++;
+	if (intf_is_moca) {
+		/*
+		 * Only one MoCA interface is supported.
+		 * We can ignore intf_id offset.
+		 */
+		memcpy(buf, brcm_moca0_macaddr, ETH_ALEN);
+	} else {
+		memcpy(buf, brcm_eth0_macaddr, ETH_ALEN);
+		macaddr_increment(buf, ETH_ALEN, intf_id);
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(brcm_alloc_macaddr);

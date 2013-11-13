@@ -97,7 +97,7 @@ static inline void brcm_netif_rx_sethook(unsigned int id,
 	brcm_netif_rx_hook[id] = fn;
 }
 
-int brcm_alloc_macaddr(u8 *buf);
+int brcm_alloc_macaddr(u8 *buf, u8 intf_id, bool intf_is_moca);
 
 extern spinlock_t brcm_magnum_spinlock;
 

@@ -453,7 +453,8 @@ static void __init brcm_register_genet(int id, uintptr_t base,
 		else
 			pdata.phy_id = BRCM_PHY_ID_AUTO;
 	}
-	brcm_alloc_macaddr(pdata.macaddr);
+
+	brcm_alloc_macaddr(pdata.macaddr, id, phy_type == BRCM_PHY_TYPE_MOCA);
 
 	pdev = platform_device_alloc("bcmgenet", id);
 	platform_device_add_resources(pdev, res, 3);
@@ -485,7 +486,7 @@ static void __init brcm_register_moca(int enet_id)
 	res[1].start = BRCM_IRQ_MOCA;
 	res[1].flags = IORESOURCE_IRQ;
 
-	brcm_alloc_macaddr(macaddr);
+	brcm_alloc_macaddr(macaddr, enet_id, true);
 	mac_to_u32(&pdata.macaddr_hi, &pdata.macaddr_lo, macaddr);
 
 	strcpy(pdata.enet_name, "bcmgenet");
@@ -535,13 +536,13 @@ static int __init platform_devices_setup(void)
 	/* Network interfaces */
 
 #if defined(CONFIG_BRCM_HAS_EMAC_0)
-	brcm_alloc_macaddr(bcmemac_0_plat_data.macaddr);
+	brcm_alloc_macaddr(bcmemac_0_plat_data.macaddr, 0, false);
 	platform_device_register(&bcmemac_0_plat_dev);
 #endif
 
 #if defined(CONFIG_BRCM_HAS_EMAC_1)
 	if (brcm_enet1_enabled) {
-		brcm_alloc_macaddr(bcmemac_1_plat_data.macaddr);
+		brcm_alloc_macaddr(bcmemac_1_plat_data.macaddr, 1, false);
 		if (brcm_enet_no_mdio)
 			bcmemac_1_plat_data.phy_id = BRCM_PHY_ID_NONE;
 		platform_device_register(&bcmemac_1_plat_dev);
