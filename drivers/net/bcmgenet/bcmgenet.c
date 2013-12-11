@@ -252,8 +252,8 @@ static void bcmgenet_clock_disable(struct BcmEnet_devctrl *pDevCtrl);
 static void save_state(struct BcmEnet_devctrl *pDevCtrl);
 static void restore_state(struct BcmEnet_devctrl *pDevCtrl);
 
-/* HFB filtering for IPv4 multicast */
-static int bcmgenet_enable_multicast_hfb(struct BcmEnet_devctrl *pDevCtrl);
+/* HFB filtering for video streams */
+static int bcmgenet_enable_video_hfb(struct BcmEnet_devctrl *pDevCtrl);
 
 /* HFB filtering for PCP */
 static void bcmgenet_enable_pcp_hfb(struct BcmEnet_devctrl *pDevCtrl);
@@ -326,7 +326,7 @@ static unsigned int hfb_arp[] = {
 };
 
 /*
- * HFB data for IPv4 packets with a multicast address in their dst field.
+ * Multicast video packets from GFTV tuners
  * Match:
  * - Ethernet frame must use Type IP (0x0800)
  * - IP version field must be 4
@@ -337,6 +337,20 @@ static unsigned int hfb_ipv4_multicast[] = {
 	/* offset 0x08: */ 0x00000000, 0x00000000, 0x000F0800, 0x00084000,
 	/* offset 0x10: */ 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	/* offset 0x18: */ 0x00000000, 0x00000000, 0x00000000, 0x0008e000,
+};
+
+/*
+ * Unicast video packets from HDHomeRun tuners
+ * Match:
+ * - Ethernet frame type = 0x0800 (IP)
+ * - IP version field = 4
+ * - IP DSCP/ECN field = 0x80
+ * - IP protocol field = 0x11 (UDP)
+ */
+static unsigned int hfb_hdhr_ipv4_dscp_udp[] = {
+	/* offset 0x00: */ 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	/* offset 0x08: */ 0x00000000, 0x00000000, 0x000F0800, 0x000B4080,
+	/* offset 0x10: */ 0x00000000, 0x00000000, 0x00000000, 0x00030011,
 };
 
 /* -------------------------------------------------------------------------
@@ -3176,7 +3190,7 @@ static int bcmgenet_init_dev(struct BcmEnet_devctrl *pDevCtrl)
 	if (pDevCtrl->phyType == BRCM_PHY_TYPE_MOCA)
 		bcmgenet_enable_pcp_hfb(pDevCtrl);
 	else
-		bcmgenet_enable_multicast_hfb(pDevCtrl);
+		bcmgenet_enable_video_hfb(pDevCtrl);
 
 	/* if we reach this point, we've init'ed successfully */
 	return 0;
@@ -3270,9 +3284,9 @@ do { \
 #endif
 
 /*
- * Enable IPv4 Multicast filtering in HFB.
+ * Enable video stream filtering in HFB.
  */
-static int bcmgenet_enable_multicast_hfb(struct BcmEnet_devctrl *pDevCtrl)
+static int bcmgenet_enable_video_hfb(struct BcmEnet_devctrl *pDevCtrl)
 {
 	struct net_device *dev = pDevCtrl->dev;
 	int filter;
@@ -3280,10 +3294,19 @@ static int bcmgenet_enable_multicast_hfb(struct BcmEnet_devctrl *pDevCtrl)
 	filter = bcmgenet_update_hfb(dev,
 		hfb_ipv4_multicast, ARRAY_SIZE(hfb_ipv4_multicast), 0);
 	if (filter < 0) {
-		printk(KERN_ERR "%s: Unable to update multicast HFB\n",
+		printk(KERN_ERR "%s: Unable to update multicast video HFB\n",
 		       __func__);
 		return -1;
 	}
+
+	filter = bcmgenet_update_hfb(dev,
+		hfb_hdhr_ipv4_dscp_udp, ARRAY_SIZE(hfb_hdhr_ipv4_dscp_udp), 0);
+	if (filter < 0) {
+		printk(KERN_ERR "%s: Unable to update unicast video HFB\n",
+		       __func__);
+		return -1;
+	}
+
 	GENET_HFB_CTRL(pDevCtrl) |= RBUF_HFB_EN;
 	return 0;
 }
