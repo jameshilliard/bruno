@@ -326,7 +326,7 @@ static unsigned int hfb_arp[] = {
 };
 
 /*
- * Multicast video packets from GFTV tuners
+ * Multicast video packets from GFTV tuners to Storage Box
  * Match:
  * - Ethernet frame must use Type IP (0x0800)
  * - IP version field must be 4
@@ -340,7 +340,7 @@ static unsigned int hfb_ipv4_multicast[] = {
 };
 
 /*
- * Unicast video packets from HDHomeRun tuners
+ * Unicast video packets from HDHomeRun tuners to Storage Box
  * Match:
  * - Ethernet frame type = 0x0800 (IP)
  * - IP version field = 4
@@ -351,6 +351,20 @@ static unsigned int hfb_hdhr_ipv4_dscp_udp[] = {
 	/* offset 0x00: */ 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	/* offset 0x08: */ 0x00000000, 0x00000000, 0x000F0800, 0x000B4080,
 	/* offset 0x10: */ 0x00000000, 0x00000000, 0x00000000, 0x00030011,
+};
+
+/*
+ * Unicast video packets from Storage Box to TV Box
+ * Match:
+ * - Ethernet frame type = 0x0800 (IP)
+ * - IP version field = 4
+ * - IP DSCP/ECN field = 0x80
+ * - IP protocol field = 0x06 (TCP)
+ */
+static unsigned int hfb_mps_ipv4_dscp_tcp[] = {
+	/* offset 0x00: */ 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	/* offset 0x08: */ 0x00000000, 0x00000000, 0x000F0800, 0x000B4080,
+	/* offset 0x10: */ 0x00000000, 0x00000000, 0x00000000, 0x00030006,
 };
 
 /* -------------------------------------------------------------------------
@@ -3302,7 +3316,15 @@ static int bcmgenet_enable_video_hfb(struct BcmEnet_devctrl *pDevCtrl)
 	filter = bcmgenet_update_hfb(dev,
 		hfb_hdhr_ipv4_dscp_udp, ARRAY_SIZE(hfb_hdhr_ipv4_dscp_udp), 0);
 	if (filter < 0) {
-		printk(KERN_ERR "%s: Unable to update unicast video HFB\n",
+		printk(KERN_ERR "%s: Unable to update unicast UDP video HFB\n",
+		       __func__);
+		return -1;
+	}
+
+	filter = bcmgenet_update_hfb(dev,
+		hfb_mps_ipv4_dscp_tcp, ARRAY_SIZE(hfb_mps_ipv4_dscp_tcp), 0);
+	if (filter < 0) {
+		printk(KERN_ERR "%s: Unable to update unicast TCP video HFB\n",
 		       __func__);
 		return -1;
 	}
