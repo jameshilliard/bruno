@@ -413,12 +413,12 @@ static inline struct hci_dev *hci_dev_hold(struct hci_dev *d)
 
 static inline void *hci_get_drvdata(struct hci_dev *hdev)
 {
-	return dev_get_drvdata(&hdev->dev);
+	return hdev->driver_data;
 }
 
 static inline void hci_set_drvdata(struct hci_dev *hdev, void *data)
 {
-	dev_set_drvdata(&hdev->dev, data);
+	hdev->driver_data = data;
 }
 
 struct hci_dev *hci_dev_get(int index);
