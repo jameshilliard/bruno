@@ -1560,6 +1560,7 @@ CONFIG_SND_USB_AUDIO=y
 CONFIG_HID_SUPPORT=y
 CONFIG_HID=y
 # CONFIG_HIDRAW is not set
+# CONFIG_UHID is not set
 
 #
 # USB Input Devices
