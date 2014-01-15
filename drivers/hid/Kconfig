@@ -535,6 +535,11 @@ config HID_ZYDACRON
 	---help---
 	Support for Zydacron remote control.
 
+config HID_GFRM
+	tristate "Google Fiber TV remote control support"
+	---help---
+	Support for Google Fiber TV remote controls
+
 endmenu
 
 endif # HID_SUPPORT
