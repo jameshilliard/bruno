@@ -608,13 +608,13 @@ static int __init platform_devices_setup(void)
 #endif /* defined(CONFIG_BRCM_HAS_GENET) */
 
 #if defined(CONFIG_BRCM_SDIO)
-	brcm_add_sdio_host(0, BCHP_SDIO_0_CFG_REG_START,
-		BCHP_SDIO_0_HOST_REG_START, BRCM_IRQ_SDIO0);
-
 #if defined(BCHP_SDIO_1_CFG_REG_START)
 	brcm_add_sdio_host(1, BCHP_SDIO_1_CFG_REG_START,
 		BCHP_SDIO_1_HOST_REG_START, BRCM_IRQ_SDIO1);
 #endif /* defined(BCHP_SDIO_1_CFG_REG_START) */
+
+	brcm_add_sdio_host(0, BCHP_SDIO_0_CFG_REG_START,
+		BCHP_SDIO_0_HOST_REG_START, BRCM_IRQ_SDIO0);
 
 #endif /* defined(CONFIG_BRCM_SDIO) */
 
