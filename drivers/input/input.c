@@ -1876,7 +1876,8 @@ int input_register_device(struct input_dev *dev)
 		 * If this is a Broadcom Bluetooth device, set delay
 		 * to 400msec and allow up to 10 events per second.
 		 */
-		if (!strncmp(bcm_bt_str, dev->name, bcm_bt_str_len)) {
+		if (!strncmp(bcm_bt_str, dev->name, bcm_bt_str_len) ||
+		    strstr(dev->name, "GFRM") == dev->name) {
 			dev->rep[REP_DELAY] = 400;
 			dev->rep[REP_PERIOD] = 100;
                 } else {
