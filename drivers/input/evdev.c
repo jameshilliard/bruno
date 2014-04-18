@@ -636,6 +636,8 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		if (put_user(dev->rep[REP_PERIOD], ip + 1))
 			return -EFAULT;
+		if (put_user(dev->rep[REP_MAX_COUNT], ip + 2))
+			return -EFAULT;
 		return 0;
 
 	case EVIOCSREP:
@@ -645,9 +647,12 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 			return -EFAULT;
 		if (get_user(v, ip + 1))
 			return -EFAULT;
+		if (get_user(t, ip + 2))
+			return -EFAULT;
 
 		input_inject_event(&evdev->handle, EV_REP, REP_DELAY, u);
 		input_inject_event(&evdev->handle, EV_REP, REP_PERIOD, v);
+		input_inject_event(&evdev->handle, EV_REP, REP_MAX_COUNT, t);
 
 		return 0;
 

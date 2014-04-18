@@ -825,7 +825,8 @@ struct input_keymap_entry {
 
 #define REP_DELAY		0x00
 #define REP_PERIOD		0x01
-#define REP_MAX			0x01
+#define REP_MAX_COUNT		0x02
+#define REP_MAX			0x02
 #define REP_CNT			(REP_MAX+1)
 
 /*
@@ -1232,6 +1233,7 @@ struct input_dev {
 	struct ff_device *ff;
 
 	unsigned int repeat_key;
+	unsigned int repeat_count;
 	struct timer_list timer;
 
 	int rep[REP_CNT];

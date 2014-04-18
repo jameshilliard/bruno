@@ -132,7 +132,8 @@ static void input_repeat_key(unsigned long data)
 			input_pass_event(dev, EV_SYN, SYN_REPORT, 1);
 		}
 
-		if (dev->rep[REP_PERIOD])
+		if (dev->rep[REP_PERIOD] && (dev->rep[REP_MAX_COUNT] == 0 ||
+		    ++dev->repeat_count <= dev->rep[REP_MAX_COUNT]))
 			mod_timer(&dev->timer, jiffies +
 					msecs_to_jiffies(dev->rep[REP_PERIOD]));
 	}
@@ -146,6 +147,7 @@ static void input_start_autorepeat(struct input_dev *dev, int code)
 	    dev->rep[REP_PERIOD] && dev->rep[REP_DELAY] &&
 	    dev->timer.data) {
 		dev->repeat_key = code;
+		dev->repeat_count = 0;
 		mod_timer(&dev->timer,
 			  jiffies + msecs_to_jiffies(dev->rep[REP_DELAY]));
 	}
@@ -1880,9 +1882,11 @@ int input_register_device(struct input_dev *dev)
 		    strstr(dev->name, "GFRM") == dev->name) {
 			dev->rep[REP_DELAY] = 400;
 			dev->rep[REP_PERIOD] = 100;
+			dev->rep[REP_MAX_COUNT] = 300;
                 } else {
 			dev->rep[REP_DELAY] = 250;
 			dev->rep[REP_PERIOD] = 33;
+			dev->rep[REP_MAX_COUNT] = 0;
 		}
 	}
 
