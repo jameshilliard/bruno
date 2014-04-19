@@ -1577,6 +1577,7 @@ static void input_dev_toggle(struct input_dev *dev, bool activate)
 	if (activate && test_bit(EV_REP, dev->evbit)) {
 		dev->event(dev, EV_REP, REP_PERIOD, dev->rep[REP_PERIOD]);
 		dev->event(dev, EV_REP, REP_DELAY, dev->rep[REP_DELAY]);
+		dev->event(dev, EV_REP, REP_MAX_COUNT, dev->rep[REP_MAX_COUNT]);
 	}
 }
 

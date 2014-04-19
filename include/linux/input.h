@@ -102,7 +102,9 @@ struct input_keymap_entry {
 #define EVIOCGVERSION		_IOR('E', 0x01, int)			/* get driver version */
 #define EVIOCGID		_IOR('E', 0x02, struct input_id)	/* get device ID */
 #define EVIOCGREP		_IOR('E', 0x03, unsigned int[2])	/* get repeat settings */
+#define EVIOCGREP_V2		_IOR('E', 0x03, unsigned int[3])
 #define EVIOCSREP		_IOW('E', 0x03, unsigned int[2])	/* set repeat settings */
+#define EVIOCSREP_V2		_IOW('E', 0x03, unsigned int[3])
 
 #define EVIOCGKEYCODE		_IOR('E', 0x04, unsigned int[2])        /* get keycode */
 #define EVIOCGKEYCODE_V2	_IOR('E', 0x04, struct input_keymap_entry)

@@ -630,30 +630,34 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 		return 0;
 
 	case EVIOCGREP:
+	case EVIOCGREP_V2:
 		if (!test_bit(EV_REP, dev->evbit))
 			return -ENOSYS;
 		if (put_user(dev->rep[REP_DELAY], ip))
 			return -EFAULT;
 		if (put_user(dev->rep[REP_PERIOD], ip + 1))
 			return -EFAULT;
-		if (put_user(dev->rep[REP_MAX_COUNT], ip + 2))
+		if (cmd == EVIOCGREP_V2 &&
+		    put_user(dev->rep[REP_MAX_COUNT], ip + 2))
 			return -EFAULT;
 		return 0;
 
 	case EVIOCSREP:
+	case EVIOCSREP_V2:
 		if (!test_bit(EV_REP, dev->evbit))
 			return -ENOSYS;
 		if (get_user(u, ip))
 			return -EFAULT;
 		if (get_user(v, ip + 1))
 			return -EFAULT;
-		if (get_user(t, ip + 2))
+		if (cmd == EVIOCSREP_V2 && get_user(t, ip + 2))
 			return -EFAULT;
 
 		input_inject_event(&evdev->handle, EV_REP, REP_DELAY, u);
 		input_inject_event(&evdev->handle, EV_REP, REP_PERIOD, v);
-		input_inject_event(&evdev->handle, EV_REP, REP_MAX_COUNT, t);
-
+		if (cmd == EVIOCSREP_V2)
+			input_inject_event(&evdev->handle, EV_REP,
+					   REP_MAX_COUNT, t);
 		return 0;
 
 	case EVIOCRMFF:
